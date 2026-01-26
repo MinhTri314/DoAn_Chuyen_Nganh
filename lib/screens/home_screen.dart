@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// Import các file cần thiết (Dùng Absolute Import cho chuẩn)
+// Import các file cần thiết
 import 'package:tri_go/constants.dart';
 import 'package:tri_go/widgets/top_bar.dart';
 import 'package:tri_go/widgets/destination_card.dart';
 import 'package:tri_go/widgets/trip_card.dart';
 import 'package:tri_go/widgets/expense_item.dart';
-// Import màn hình Khám phá
-import 'package:tri_go/screens/explore/explore_screen.dart'; // Đảm bảo đường dẫn này đúng với nơi bạn lưu file explore_screen.dart
+
+// Import các màn hình
+import 'package:tri_go/screens/explore/explore_screen.dart';
+import 'package:tri_go/screens/trip/TripDetailScreen.dart'; // <--- Import màn hình chi tiết chuyến đi
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -26,7 +28,6 @@ class HomeScreen extends StatelessWidget {
               const TopBar(),
 
               // SECTION 1: Địa điểm nổi bật
-              // Sửa: Thêm sự kiện onTap để chuyển trang
               _buildSectionHeader(
                 'Địa điểm nổi bật', 
                 'Khám phá', 
@@ -43,21 +44,18 @@ class HomeScreen extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: const [
-                    // Card 1: Vịnh Hạ Long
                     DestinationCard(
                       title: 'Vịnh Hạ Long',
                       location: 'Quảng Ninh',
                       description: 'Kỳ quan thiên nhiên thế giới với hàng ngàn đảo đá vôi kỳ vĩ.',
-                      imageUrl: 'https://picsum.photos/id/1015/800/600', // Dùng link mạng cho đẹp
+                      imageUrl: 'https://picsum.photos/id/1015/800/600',
                     ),
-                    // Card 2: Đà Lạt
                     DestinationCard(
                       title: 'Đà Lạt',
                       location: 'Lâm Đồng',
                       description: 'Thành phố ngàn hoa với khí hậu ôn đới quanh năm.',
-                      imageUrl: 'assets/images/da_lat.webp', // Đã sửa lỗi chính tả ssets -> assets
+                      imageUrl: 'assets/images/da_lat.webp',
                     ),
-                    // Card 3: Phú Quốc
                     DestinationCard(
                       title: 'Phú Quốc',
                       location: 'Kiên Giang',
@@ -71,16 +69,36 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 10),
 
               // SECTION 2: Chuyến đi sắp tới
-              _buildSectionHeader('Chuyến đi sắp tới', 'Xem tất cả', onTap: () {}), // Tạm thời chưa làm gì
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: TripCard(
-                  title: 'Phú Quốc - 3 ngày',
-                  date: '15 Th09 - 18 Th09',
-                  membersCount: '4 thành viên',
-                  imageUrl: 'assets/images/phu_quoc.webp',
-                  status: 'Đang đặt chỗ',
-                  plusMember: 1,
+              _buildSectionHeader(
+                'Chuyến đi sắp tới', 
+                'Xem tất cả', 
+                onTap: () {
+                  // --- SỰ KIỆN CHUYỂN TRANG KHI BẤM "XEM TẤT CẢ" ---
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const TripDetailScreen()),
+                  );
+                }
+              ),
+              
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GestureDetector( // --- BỌC TRIP CARD ĐỂ BẤM ĐƯỢC ---
+                  onTap: () {
+                    // --- SỰ KIỆN CHUYỂN TRANG KHI BẤM VÀO CARD ---
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const TripDetailScreen()),
+                    );
+                  },
+                  child: const TripCard(
+                    title: 'Phú Quốc - 3 ngày',
+                    date: '15 Th09 - 18 Th09',
+                    membersCount: '4 thành viên',
+                    imageUrl: 'assets/images/phu_quoc.webp',
+                    status: 'Đang đặt chỗ',
+                    plusMember: 1,
+                  ),
                 ),
               ),
 
@@ -121,7 +139,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  // Hàm tạo tiêu đề Section (Đã nâng cấp để nhận sự kiện bấm)
+  // Hàm tạo tiêu đề Section
   Widget _buildSectionHeader(String title, String actionText, {VoidCallback? onTap}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
@@ -132,10 +150,10 @@ class HomeScreen extends StatelessWidget {
               style: GoogleFonts.plusJakartaSans(
                   fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textDark)),
           
-          // Bọc nút bấm vào InkWell
           InkWell(
-            onTap: onTap, 
-            child: Padding( // Thêm padding để vùng bấm rộng hơn chút
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
               padding: const EdgeInsets.all(4.0),
               child: Text(actionText,
                   style: GoogleFonts.plusJakartaSans(
