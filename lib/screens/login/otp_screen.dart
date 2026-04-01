@@ -1,15 +1,83 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:tri_go/constants.dart'; // <-- Cách này gọi là "gọi thẳng tên", không sợ sai
-import '../home_screen.dart'; // Xác thực xong thì vào Home
+import 'package:tri_go/constants.dart'; 
+import 'package:firebase_auth/firebase_auth.dart'; // Thêm Firebase
+import '../home_screen.dart'; 
 
-class OtpScreen extends StatelessWidget {
-  const OtpScreen({super.key});
+class OtpScreen extends StatefulWidget {
+  final String email; 
+  
+  const OtpScreen({super.key, required this.email});
+
+  @override
+  State<OtpScreen> createState() => _OtpScreenState();
+}
+
+class _OtpScreenState extends State<OtpScreen> {
+  bool _isLoading = false;
+
+  // --- HÀM KIỂM TRA XEM USER ĐÃ BẤM LINK TRONG EMAIL CHƯA ---
+  Future<void> _checkEmailVerified() async {
+    setState(() => _isLoading = true);
+
+    try {
+      User? user = FirebaseAuth.instance.currentUser;
+      
+      // BẮT BUỘC PHẢI RELOAD ĐỂ CẬP NHẬT TRẠNG THÁI MỚI NHẤT TỪ FIREBASE
+      await user?.reload(); 
+      user = FirebaseAuth.instance.currentUser;
+
+      if (user != null && user.emailVerified) {
+        // Nếu đã xác thực -> Bay vào Home
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context, 
+            MaterialPageRoute(builder: (context) => const HomeScreen()), 
+            (route) => false
+          );
+        }
+      } else {
+        // Nếu chưa bấm link mà lanh chanh bấm nút
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Tài khoản chưa được xác thực. Vui lòng kiểm tra email và bấm vào link!'),
+              backgroundColor: Colors.red,
+            )
+          );
+        }
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Có lỗi xảy ra, vui lòng thử lại!'), backgroundColor: Colors.red)
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- HÀM GỬI LẠI EMAIL NẾU USER KHÔNG TÌM THẤY ---
+  Future<void> _resendEmail() async {
+    try {
+      await FirebaseAuth.instance.currentUser?.sendEmailVerification();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Đã gửi lại email xác thực!'), backgroundColor: Colors.green)
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gửi lại email thất bại. Vui lòng đợi một lát!'), backgroundColor: Colors.red)
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white, // Hoặc Color(0xFFF6F8F8)
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.transparent, elevation: 0,
         leading: const BackButton(color: AppColors.textDark),
@@ -21,112 +89,57 @@ class OtpScreen extends StatelessWidget {
         child: Column(
           children: [
             const SizedBox(height: 40),
-            Text('Nhập mã xác thực', style: GoogleFonts.plusJakartaSans(fontSize: 32, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+            // Đổi icon cho phù hợp ngữ cảnh
+            Container(
+              width: 100, height: 100,
+              decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), shape: BoxShape.circle),
+              child: const Icon(Icons.mark_email_read_outlined, size: 50, color: AppColors.primary),
+            ),
+            const SizedBox(height: 32),
+            
+            Text('Kiểm tra hòm thư', style: GoogleFonts.plusJakartaSans(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.textDark)),
             const SizedBox(height: 12),
             RichText(
               textAlign: TextAlign.center,
               text: TextSpan(
-                style: GoogleFonts.plusJakartaSans(fontSize: 16, color: AppColors.textGrey, height: 1.5),
-                children: const [
-                  TextSpan(text: 'Vui lòng nhập mã xác thực gồm 6 chữ số đã được gửi đến email:\n'),
-                  TextSpan(text: 'trip-planner@example.com', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+                style: GoogleFonts.plusJakartaSans(fontSize: 15, color: AppColors.textGrey, height: 1.5),
+                children: [
+                  const TextSpan(text: 'Chúng tôi vừa gửi một đường link xác thực tài khoản tới email:\n'),
+                  TextSpan(text: widget.email, style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
+                  const TextSpan(text: '\n\nVui lòng nhấn vào link trong email để kích hoạt tài khoản của bạn.'),
                 ],
               ),
             ),
             
             const SizedBox(height: 40),
             
-            // 6 ô nhập mã
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: List.generate(6, (index) => _buildOtpDigit()),
-            ),
-            
-            const SizedBox(height: 40),
-            
-            const Text('Bạn chưa nhận được mã?', style: TextStyle(color: AppColors.textGrey)),
-            const SizedBox(height: 16),
-            
-            // Timer
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                _buildTimerBox('00', 'PHÚT'),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                  child: Text(':', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primary)),
+            // Nút Xác nhận đã bấm link
+            SizedBox(
+              width: double.infinity, height: 56,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _checkEmailVerified,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary, 
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 4,
+                  shadowColor: AppColors.primary.withOpacity(0.3),
                 ),
-                _buildTimerBox('59', 'GIÂY'),
-              ],
-            ),
-            
-            const SizedBox(height: 20),
-            TextButton(
-              onPressed: () {},
-              child: Text('Gửi lại mã ngay', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.w600)),
+                child: _isLoading 
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : Text('Tôi đã bấm link xác thực', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+              ),
             ),
 
-            const SizedBox(height: 40),
+            const SizedBox(height: 24),
             
-            // Button Xác nhận
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: () {
-                   // Vào Home
-                   Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const HomeScreen()), (route) => false);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 6,
-                  shadowColor: AppColors.primary.withOpacity(0.4),
-                ),
-                child: Text('Xác nhận', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-              ),
+            // Nút Gửi lại
+            TextButton(
+              onPressed: _resendEmail,
+              child: Text('Chưa nhận được? Gửi lại email', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 14)),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildOtpDigit() {
-    return Container(
-      width: 45, height: 56,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF6F8F8), // Màu nền ô nhập
-        borderRadius: BorderRadius.circular(12),
-        // border: Border.all(color: Colors.transparent), // Khi focus sẽ đổi màu border
-      ),
-      child: Center(
-        child: TextField(
-          textAlign: TextAlign.center,
-          style: GoogleFonts.plusJakartaSans(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textDark),
-          decoration: const InputDecoration(border: InputBorder.none, counterText: ''),
-          keyboardType: TextInputType.number,
-          maxLength: 1,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTimerBox(String value, String label) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-          ),
-          child: Text(value, style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primary)),
-        ),
-        const SizedBox(height: 4),
-        Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textGrey, fontWeight: FontWeight.bold)),
-      ],
     );
   }
 }

@@ -1,28 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:tri_go/models/activity.dart'; // Import Model
+import 'add_activity_screen.dart';
 
-class AddActivityScreen extends StatefulWidget {
-  const AddActivityScreen({super.key});
+class ScheduleScreen extends StatefulWidget {
+  const ScheduleScreen({super.key});
 
   @override
-  State<AddActivityScreen> createState() => _AddActivityScreenState();
+  State<ScheduleScreen> createState() => _ScheduleScreenState();
 }
 
-class _AddActivityScreenState extends State<AddActivityScreen> {
-  // Màu sắc chủ đạo
+class _ScheduleScreenState extends State<ScheduleScreen> {
   static const Color primaryColor = Color(0xFF1999B3);
-  static const Color textDark = Color(0xFF111617);
-  
-  // State quản lý loại hoạt động đang chọn
-  int _selectedIndex = 0;
-  
-  final List<Map<String, dynamic>> _categories = [
-    {'icon': Icons.restaurant, 'label': 'Ăn uống'},
-    {'icon': Icons.camera_alt, 'label': 'Chụp ảnh'},
-    {'icon': Icons.local_cafe, 'label': 'Cà phê'},
-    {'icon': Icons.hotel, 'label': 'Nghỉ ngơi'},
-    {'icon': Icons.directions_car, 'label': 'Di chuyển'},
-    {'icon': Icons.more_horiz, 'label': 'Khác'},
+  static const Color coralColor = Color(0xFFF79A7F);
+
+  // Tạo một danh sách lịch trình giả định ban đầu
+  List<Activity> scheduleList = [
+    Activity(title: 'Ăn sáng tại Bánh mì Xíu mại', time: '08:00', location: '26 Hoàng Diệu, Đà Lạt', icon: Icons.restaurant, color: primaryColor),
+    Activity(title: 'Check-in Quảng trường Lâm Viên', time: '09:30', location: 'Phường 10, Đà Lạt', icon: Icons.camera_alt, color: coralColor),
   ];
 
   @override
@@ -32,114 +27,83 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: textDark),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text('Thêm hoạt động mới', 
-          style: GoogleFonts.plusJakartaSans(color: textDark, fontWeight: FontWeight.w800, fontSize: 18)),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black), onPressed: () => Navigator.pop(context)),
+        title: Text('Lịch trình Chuyến đi', style: GoogleFonts.plusJakartaSans(color: Colors.black, fontWeight: FontWeight.w800)),
         centerTitle: true,
       ),
       body: Column(
         children: [
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 1. Tên hoạt động
-                  _buildLabel('Tên hoạt động'),
-                  _buildTextField(hintText: 'Ví dụ: Ăn trưa tại chợ Đà Lạt'),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // 2. Thời gian
-                  _buildLabel('Thời gian'),
-                  _buildTextField(hintText: '08:00 AM', icon: Icons.access_time, isReadOnly: true),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // 3. Địa điểm
-                  _buildLabel('Địa điểm'),
-                  _buildTextField(hintText: 'Tìm kiếm địa điểm...', icon: Icons.location_on, iconColor: primaryColor),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // 4. Loại hoạt động
-                  _buildLabel('Loại hoạt động'),
-                  const SizedBox(height: 12),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: List.generate(_categories.length, (index) {
-                        final isSelected = _selectedIndex == index;
-                        return GestureDetector(
-                          onTap: () => setState(() => _selectedIndex = index),
-                          child: Container(
-                            margin: const EdgeInsets.only(right: 16),
-                            child: Column(
-                              children: [
-                                Container(
-                                  width: 60, height: 60,
-                                  decoration: BoxDecoration(
-                                    color: isSelected ? primaryColor : Colors.white,
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(color: isSelected ? primaryColor : Colors.grey.shade200),
-                                    boxShadow: isSelected 
-                                      ? [BoxShadow(color: primaryColor.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))] 
-                                      : [],
-                                  ),
-                                  child: Icon(
-                                    _categories[index]['icon'], 
-                                    color: isSelected ? Colors.white : Colors.grey.shade400,
-                                    size: 28
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _categories[index]['label'],
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 12, 
-                                    fontWeight: FontWeight.bold,
-                                    color: isSelected ? primaryColor : Colors.grey.shade400
-                                  ),
-                                )
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  )
-                ],
-              ),
+          // 1. Day Tabs (Giữ nguyên giao diện)
+          Container(
+            height: 60, padding: const EdgeInsets.symmetric(vertical: 8),
+            child: ListView(
+              scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                _buildDayTab('Ngày 1', true), _buildDayTab('Ngày 2', false),
+              ],
             ),
           ),
           
-          // Button Lưu
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Colors.grey.shade100)),
-            ),
-            child: SafeArea(
-              child: SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context), // Giả lập lưu xong thì đóng
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    elevation: 5,
-                    shadowColor: primaryColor.withOpacity(0.4),
-                  ),
-                  child: Text('Lưu vào lịch trình', 
-                    style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                ),
-              ),
+          // 2. Timeline List (Tự động load từ danh sách scheduleList)
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(24),
+              itemCount: scheduleList.length + 1, // Cộng 1 để chừa chỗ cho Nút "Thêm hoạt động" ở cuối cùng
+              itemBuilder: (context, index) {
+                
+                // Nếu là phần tử cuối cùng thì in ra Nút Thêm
+                if (index == scheduleList.length) {
+                  return Column(
+                    children: [
+                      const SizedBox(height: 16),
+                      InkWell(
+                        onTap: () async {
+                          // Bấm nút thêm -> Chờ kết quả trả về từ trang AddActivity
+                          final Activity? newAct = await Navigator.push(
+                            context, 
+                            MaterialPageRoute(builder: (context) => const AddActivityScreen())
+                          );
+
+                          // Nếu có dữ liệu trả về -> Thêm vào List và báo UI vẽ lại
+                          if (newAct != null) {
+                            setState(() {
+                              scheduleList.add(newAct);
+                              // Tùy chọn: Bạn có thể viết hàm sort() ở đây để sắp xếp lại theo giờ
+                            });
+                          }
+                        },
+                        child: Container(
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade50, borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey.shade300, style: BorderStyle.solid),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.add_circle, color: Colors.grey),
+                              const SizedBox(width: 8),
+                              Text('Thêm hoạt động', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      )
+                    ],
+                  );
+                }
+
+                // Nếu không phải phần tử cuối thì in ra UI của Timeline
+                final act = scheduleList[index];
+                return _buildTimelineItem(
+                  time: act.time,
+                  title: act.title,
+                  location: act.location,
+                  icon: act.icon,
+                  color: act.color,
+                  isFirst: index == 0,
+                  isLast: index == scheduleList.length - 1, // Đường kẻ dọc
+                );
+              },
             ),
           )
         ],
@@ -147,31 +111,68 @@ class _AddActivityScreenState extends State<AddActivityScreen> {
     );
   }
 
-  Widget _buildLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12, left: 4),
-      child: Text(text, 
-        style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey.shade500)),
+  // --- Các hàm UI phụ trợ giữ nguyên ---
+  Widget _buildDayTab(String text, bool isSelected) {
+    return Container(
+      margin: const EdgeInsets.only(right: 12), padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8), alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: isSelected ? primaryColor : Colors.white, borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isSelected ? primaryColor : Colors.grey.shade200),
+      ),
+      child: Text(text, style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: isSelected ? Colors.white : Colors.grey.shade500)),
     );
   }
 
-  Widget _buildTextField({required String hintText, IconData? icon, Color? iconColor, bool isReadOnly = false}) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade100),
-      ),
-      child: TextField(
-        readOnly: isReadOnly,
-        decoration: InputDecoration(
-          hintText: hintText,
-          hintStyle: GoogleFonts.plusJakartaSans(color: Colors.grey.shade400),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.all(20),
-          prefixIcon: icon != null ? Icon(icon, color: iconColor ?? Colors.grey.shade400) : null,
-          suffixIcon: isReadOnly ? const Icon(Icons.keyboard_arrow_down, color: Colors.grey) : null,
-        ),
+  Widget _buildTimelineItem({required String time, required String title, required String location, required IconData icon, required Color color, bool isFirst = false, bool isLast = false}) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 50,
+            child: Column(
+              children: [
+                Container(
+                  width: 40, height: 40,
+                  decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 4)),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                // Đường nối dọc giữa các mốc thời gian
+                Expanded(child: Container(width: 2, color: Colors.grey.shade200))
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(time, style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: color)),
+                      if (isFirst) ...[
+                        const Spacer(),
+                        Text('ĐÃ LÊN LỊCH', style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey.shade400)),
+                      ]
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.location_on, size: 14, color: Colors.grey.shade400),
+                      const SizedBox(width: 4),
+                      Text(location, style: GoogleFonts.plusJakartaSans(fontSize: 13, color: Colors.grey.shade500)),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          )
+        ],
       ),
     );
   }

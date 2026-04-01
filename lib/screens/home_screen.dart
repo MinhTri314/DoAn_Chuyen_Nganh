@@ -8,20 +8,53 @@ import 'package:tri_go/widgets/destination_card.dart';
 import 'package:tri_go/widgets/trip_card.dart';
 import 'package:tri_go/widgets/expense_item.dart';
 
+// Import Data Mock và Models
+import 'package:tri_go/models/trip.dart';
+import 'package:tri_go/data/mock_data.dart'; 
+
 // Import các màn hình
 import 'package:tri_go/screens/explore/explore_screen.dart';
-import 'package:tri_go/screens/trip/TripDetailScreen.dart'; // <--- Import màn hình chi tiết chuyến đi
+import 'package:tri_go/screens/trip/TripDetailScreen.dart';
+import 'package:tri_go/screens/create_trip/create_trip_screen.dart'; // <--- IMPORT TRANG TẠO CHUYẾN ĐI VÀO ĐÂY
 
-class HomeScreen extends StatelessWidget {
+// --- CHUYỂN THÀNH STATEFUL WIDGET ĐỂ UPDATE UI KHI CÓ DATA MỚI ---
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      
+      // --- THÊM NÚT DẤU + ĐỂ TẠO CHUYẾN ĐI Ở ĐÂY ---
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          // Điều hướng sang trang tạo chuyến đi và chờ kết quả trả về
+          final result = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const CreateTripScreen()),
+          );
+          
+          // Nếu trang tạo chuyến đi trả về true (tạo thành công), thì load lại giao diện
+          if (result == true) {
+            setState(() {
+              // Giao diện sẽ tự động vẽ lại list mockTrips mới
+            });
+          }
+        },
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.add, color: Colors.white, size: 28),
+      ),
+      // ----------------------------------------------
+
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.only(bottom: 20),
+          padding: const EdgeInsets.only(bottom: 80), // Tăng bottom padding để không bị nút + che mất nội dung
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -73,32 +106,36 @@ class HomeScreen extends StatelessWidget {
                 'Chuyến đi sắp tới', 
                 'Xem tất cả', 
                 onTap: () {
-                  // --- SỰ KIỆN CHUYỂN TRANG KHI BẤM "XEM TẤT CẢ" ---
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => const TripDetailScreen()),
-                  );
+                  // Nút xem tất cả
                 }
               ),
               
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: GestureDetector( // --- BỌC TRIP CARD ĐỂ BẤM ĐƯỢC ---
-                  onTap: () {
-                    // --- SỰ KIỆN CHUYỂN TRANG KHI BẤM VÀO CARD ---
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const TripDetailScreen()),
+              // DÙNG LISTVIEW.BUILDER ĐỂ DUYỆT DATA MOCK
+              SizedBox(
+                height: 280, 
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: mockTrips.length, 
+                  itemBuilder: (context, index) {
+                    final Trip trip = mockTrips[index]; 
+
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => TripDetailScreen(trip: trip),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        width: 320, 
+                        margin: const EdgeInsets.only(right: 16),
+                        child: TripCard(trip: trip), 
+                      ),
                     );
                   },
-                  child: const TripCard(
-                    title: 'Phú Quốc - 3 ngày',
-                    date: '15 Th09 - 18 Th09',
-                    membersCount: '4 thành viên',
-                    imageUrl: 'assets/images/phu_quoc.webp',
-                    status: 'Đang đặt chỗ',
-                    plusMember: 1,
-                  ),
                 ),
               ),
 

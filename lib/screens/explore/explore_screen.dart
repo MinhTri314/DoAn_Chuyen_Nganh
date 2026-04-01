@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+// Import constants cho màu sắc
 import 'package:tri_go/constants.dart';
+
 // Import màn hình Tạo chuyến đi
 import 'package:tri_go/screens/create_trip/create_trip_screen.dart';
 
@@ -87,7 +90,8 @@ class ExploreScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(24),
                   image: const DecorationImage(
-                    image: NetworkImage('https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&q=80'),
+                    // FIX ẢNH 1: Đổi sang picsum
+                    image: NetworkImage('https://picsum.photos/id/1016/800/600'),
                     fit: BoxFit.cover,
                   ),
                 ),
@@ -118,7 +122,12 @@ class ExploreScreen extends StatelessWidget {
                           Text('Hành trình di sản tại Vịnh Hạ Long', style: GoogleFonts.epilogue(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white, height: 1.2)),
                           const SizedBox(height: 12),
                           ElevatedButton(
-                            onPressed: () {},
+                            onPressed: () {
+                              Navigator.push(
+                                context, 
+                                MaterialPageRoute(builder: (context) => const CreateTripScreen(initialDestination: 'Vịnh Hạ Long')) // Truyền tên đi
+                              );
+                            },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white,
                               foregroundColor: Colors.black,
@@ -158,23 +167,23 @@ class ExploreScreen extends StatelessWidget {
                 children: [
                   // Card 1
                   _buildDestinationCard(
-                    context, // <--- Truyền context vào đây
+                    context, 
                     title: 'Nha Trang',
                     location: 'Khánh Hòa, Việt Nam',
                     price: '2.5M VNĐ',
                     rating: '4.9',
-                    imageUrl: 'https://images.unsplash.com/photo-1570535073047-9759c9d46927?w=800&q=80',
+                    imageUrl: 'https://picsum.photos/id/1043/800/600', // FIX ẢNH 2
                     tags: ['Lặn biển', 'Nhảy đảo', '+2 khác'],
                   ),
                   const SizedBox(height: 20),
                   // Card 2
                   _buildDestinationCard(
-                    context, // <--- Truyền context vào đây
+                    context, 
                     title: 'Sapa',
                     location: 'Lào Cai, Việt Nam',
                     price: '1.8M VNĐ',
                     rating: '4.7',
-                    imageUrl: 'https://images.unsplash.com/photo-1555546415-0d48f9468925?w=800&q=80',
+                    imageUrl: 'https://picsum.photos/id/1018/800/600', // FIX ẢNH 3
                     tags: ['Trekking', 'Chợ phiên', 'Homestay'],
                   ),
                 ],
@@ -197,13 +206,13 @@ class ExploreScreen extends StatelessWidget {
                   _buildInsightCard(
                     category: 'Mẹo du lịch',
                     title: 'Làm sao để tối ưu hóa ngân sách khi đi theo nhóm?',
-                    imageUrl: 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=400&q=80',
+                    imageUrl: 'https://picsum.photos/id/1019/400/300', // FIX ẢNH 4
                   ),
                   const SizedBox(width: 16),
                   _buildInsightCard(
                     category: 'Ẩm thực',
                     title: 'Top 5 món ăn đường phố phải thử tại Hà Nội',
-                    imageUrl: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=400&q=80',
+                    imageUrl: 'https://picsum.photos/id/1020/400/300', // FIX ẢNH 5
                   ),
                 ],
               ),
@@ -230,7 +239,6 @@ class ExploreScreen extends StatelessWidget {
     );
   }
 
-  // Cập nhật hàm này: Thêm tham số BuildContext context
   Widget _buildDestinationCard(BuildContext context, {required String title, required String location, required String price, required String rating, required String imageUrl, required List<String> tags}) {
     return Container(
       decoration: BoxDecoration(
@@ -248,7 +256,13 @@ class ExploreScreen extends StatelessWidget {
                 height: 200,
                 decoration: BoxDecoration(
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                  image: DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover),
+                  // HỖ TRỢ LOAD CẢ ẢNH MẠNG VÀ ẢNH ASSET NHƯ TRANG CHỦ
+                  image: DecorationImage(
+                    image: imageUrl.startsWith('http')
+                        ? NetworkImage(imageUrl)
+                        : AssetImage(imageUrl) as ImageProvider,
+                    fit: BoxFit.cover
+                  ),
                 ),
               ),
               Positioned(
@@ -308,10 +322,10 @@ class ExploreScreen extends StatelessWidget {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () {
-                      // --- SỰ KIỆN CHUYỂN TRANG Ở ĐÂY ---
+                      // TRUYỀN TÊN ĐỊA ĐIỂM SANG TRANG TẠO CHUYẾN ĐI
                       Navigator.push(
                         context, 
-                        MaterialPageRoute(builder: (context) => const CreateTripScreen())
+                        MaterialPageRoute(builder: (context) => CreateTripScreen(initialDestination: title))
                       );
                     },
                     style: ElevatedButton.styleFrom(
@@ -348,7 +362,12 @@ class ExploreScreen extends StatelessWidget {
             height: 140,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              image: DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover),
+              image: DecorationImage(
+                image: imageUrl.startsWith('http')
+                        ? NetworkImage(imageUrl)
+                        : AssetImage(imageUrl) as ImageProvider,
+                fit: BoxFit.cover
+              ),
             ),
           ),
           const SizedBox(height: 10),

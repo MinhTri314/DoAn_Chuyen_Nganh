@@ -1,29 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:tri_go/constants.dart';
+import 'package:tri_go/models/trip.dart'; // Đã import Model Trip
 
 class TripCard extends StatelessWidget {
-  final String title;
-  final String date;
-  final String membersCount;
-  final String imageUrl;
-  final String status;
-  final int plusMember;
+  final Trip trip; // Chỉ cần nhận 1 object Trip
 
   const TripCard({
     super.key,
-    required this.title,
-    required this.date,
-    required this.membersCount,
-    required this.imageUrl,
-    required this.status,
-    required this.plusMember,
+    required this.trip,
   });
+
+  // Hàm phụ: Chuyển đổi định dạng ngày cho đẹp (15 Th09 - 18 Th09)
+  String _formatDate(DateTime start, DateTime end) {
+    String startMonth = start.month.toString().padLeft(2, '0');
+    String endMonth = end.month.toString().padLeft(2, '0');
+    return '${start.day} Th$startMonth - ${end.day} Th$endMonth';
+  }
 
   @override
   Widget build(BuildContext context) {
+    // Tạm thời fix cứng các thông số chưa có trong Model Trip để giữ nguyên giao diện đẹp
+    const String status = 'Sắp diễn ra';
+    const String membersCount = '4 thành viên';
+    const int plusMember = 1;
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(16),
@@ -46,9 +48,9 @@ class TripCard extends StatelessWidget {
                 child: AspectRatio(
                   aspectRatio: 16 / 9, // Tỉ lệ ảnh chuẩn màn hình rộng
                   child: Image(
-                    image: imageUrl.startsWith('http') 
-                        ? NetworkImage(imageUrl) 
-                        : AssetImage(imageUrl) as ImageProvider,
+                    image: trip.imageUrl.startsWith('http')
+                        ? NetworkImage(trip.imageUrl)
+                        : AssetImage(trip.imageUrl) as ImageProvider,
                     fit: BoxFit.cover,
                   ),
                 ),
@@ -83,7 +85,7 @@ class TripCard extends StatelessWidget {
               // Tiêu đề (Góc dưới trái)
               Positioned(
                 bottom: 12, left: 16,
-                child: Text(title,
+                child: Text(trip.title, // LẤY TÊN TỪ TRONG TRIP
                     style: GoogleFonts.plusJakartaSans(
                         color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
               ),
@@ -99,7 +101,7 @@ class TripCard extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildInfoRow(Icons.calendar_today, date),
+                    _buildInfoRow(Icons.calendar_today, _formatDate(trip.startDate, trip.endDate)), // LẤY NGÀY THÁNG
                     const SizedBox(height: 6),
                     _buildInfoRow(Icons.group_outlined, membersCount),
                   ],

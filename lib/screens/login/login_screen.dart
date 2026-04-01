@@ -1,23 +1,108 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:tri_go/constants.dart'; // <-- Cách này gọi là "gọi thẳng tên", không sợ sai
-import 'register_screen.dart'; // Để chuyển trang
-import '../home_screen.dart';    // Để đăng nhập thành công
+import 'package:tri_go/constants.dart'; 
+import 'package:firebase_auth/firebase_auth.dart'; 
+import 'package:shared_preferences/shared_preferences.dart'; // IMPORT THƯ VIỆN MỚI
+import 'register_screen.dart'; 
+import '../home_screen.dart';    
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  
+  bool _isLoading = false;
+  bool _rememberMe = true; 
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials(); // GỌI HÀM TỰ ĐỘNG ĐIỀN KHI VỪA MỞ TRANG
+  }
+
+  // --- HÀM ĐỌC DỮ LIỆU ĐÃ LƯU ---
+  Future<void> _loadSavedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('saved_email');
+    final savedPassword = prefs.getString('saved_password');
+    final isRemembered = prefs.getBool('remember_me') ?? true;
+
+    if (savedEmail != null && savedPassword != null) {
+      setState(() {
+        _emailController.text = savedEmail;
+        _passwordController.text = savedPassword;
+        _rememberMe = isRemembered;
+      });
+    }
+  }
+
+  // --- HÀM LƯU HOẶC XÓA DỮ LIỆU ---
+  Future<void> _handleRememberMe() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_rememberMe) {
+      // Nếu tick -> Lưu lại
+      await prefs.setString('saved_email', _emailController.text.trim());
+      await prefs.setString('saved_password', _passwordController.text.trim());
+      await prefs.setBool('remember_me', true);
+    } else {
+      // Nếu bỏ tick -> Xóa đi
+      await prefs.remove('saved_email');
+      await prefs.remove('saved_password');
+      await prefs.setBool('remember_me', false);
+    }
+  }
+
+  Future<void> _handleLogin() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng nhập đủ Email và Mật khẩu')));
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+      );
+      
+      // GỌI HÀM LƯU DỮ LIỆU KHI ĐĂNG NHẬP THÀNH CÔNG
+      await _handleRememberMe();
+      
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context, 
+          MaterialPageRoute(builder: (context) => const HomeScreen()),
+          (route) => false 
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      String message = 'Đăng nhập thất bại';
+      if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+        message = 'Tài khoản không tồn tại hoặc sai thông tin';
+      } else if (e.code == 'wrong-password') {
+        message = 'Sai mật khẩu';
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textDark),
-          onPressed: () {}, // Tạm thời chưa back đi đâu
-        ),
+        backgroundColor: Colors.transparent, elevation: 0,
+        automaticallyImplyLeading: false,
         title: Text('Đăng nhập', style: GoogleFonts.plusJakartaSans(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 18)),
         centerTitle: true,
       ),
@@ -33,42 +118,59 @@ class LoginScreen extends StatelessWidget {
             
             const SizedBox(height: 32),
             
-            // Ô Email
-            _buildLabel('Email'),
-            _buildInput(hint: 'Email của bạn', icon: null),
+            Text('Email', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textDark)),
+            const SizedBox(height: 8),
+            _buildInput(controller: _emailController, hint: 'Email của bạn'),
             
             const SizedBox(height: 20),
             
-            // Ô Mật khẩu
-            _buildLabel('Mật khẩu'),
-            _buildInput(hint: 'Mật khẩu', icon: Icons.visibility_outlined, isPassword: true),
+            Text('Mật khẩu', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textDark)),
+            const SizedBox(height: 8),
+            _buildInput(controller: _passwordController, hint: 'Mật khẩu', icon: Icons.visibility_outlined, isPassword: true),
             
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: () {},
-                child: Text('Quên mật khẩu?', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.w600)),
-              ),
+            const SizedBox(height: 16),
+            
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 24, height: 24,
+                      child: Checkbox(
+                        value: _rememberMe,
+                        onChanged: (value) {
+                          setState(() {
+                            _rememberMe = value ?? true;
+                          });
+                        },
+                        activeColor: AppColors.primary,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        side: const BorderSide(color: AppColors.borderColor),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text('Ghi nhớ tài khoản', style: GoogleFonts.plusJakartaSans(color: AppColors.textDark, fontWeight: FontWeight.w500, fontSize: 14)),
+                  ],
+                ),
+                TextButton(
+                  onPressed: () {}, 
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 30), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                  child: Text('Quên mật khẩu?', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 14))
+                ),
+              ],
             ),
             
             const SizedBox(height: 24),
             
-            // Nút Đăng nhập
             SizedBox(
-              width: double.infinity,
-              height: 56,
+              width: double.infinity, height: 56,
               child: ElevatedButton(
-                onPressed: () {
-                   // Giả lập đăng nhập -> Vào Home
-                   Navigator.push(context, MaterialPageRoute(builder: (context) => const HomeScreen()));
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 4,
-                  shadowColor: AppColors.primary.withOpacity(0.4),
-                ),
-                child: Text('Đăng nhập', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                onPressed: _isLoading ? null : _handleLogin,
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                child: _isLoading 
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : Text('Đăng nhập', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
               ),
             ),
             
@@ -76,22 +178,13 @@ class LoginScreen extends StatelessWidget {
             _buildDivider(),
             const SizedBox(height: 30),
             
-            // Nút Google
-            _buildGoogleButton(),
-            
-            const SizedBox(height: 40),
             Center(
               child: GestureDetector(
-                onTap: () {
-                   Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen()));
-                },
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())),
                 child: RichText(
                   text: TextSpan(
-                    text: 'Bạn chưa có tài khoản? ',
-                    style: GoogleFonts.plusJakartaSans(color: AppColors.textGrey),
-                    children: [
-                      TextSpan(text: 'Đăng ký ngay', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.bold)),
-                    ],
+                    text: 'Bạn chưa có tài khoản? ', style: GoogleFonts.plusJakartaSans(color: AppColors.textGrey),
+                    children: [TextSpan(text: 'Đăng ký ngay', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.bold))],
                   ),
                 ),
               ),
@@ -102,32 +195,14 @@ class LoginScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 4),
-      child: Text(text, style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.textDark)),
-    );
-  }
-
-  Widget _buildInput({required String hint, IconData? icon, bool isPassword = false}) {
+  Widget _buildInput({required TextEditingController controller, required String hint, IconData? icon, bool isPassword = false}) {
     return Container(
       height: 56,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderColor),
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.borderColor)),
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      alignment: Alignment.centerLeft,
       child: TextField(
-        obscureText: isPassword,
-        style: GoogleFonts.plusJakartaSans(color: AppColors.textDark),
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          hintText: hint,
-          hintStyle: GoogleFonts.plusJakartaSans(color: AppColors.textGrey),
-          suffixIcon: icon != null ? Icon(icon, color: AppColors.textGrey) : null,
-        ),
+        controller: controller, obscureText: isPassword,
+        decoration: InputDecoration(border: InputBorder.none, hintText: hint, suffixIcon: icon != null ? Icon(icon, color: AppColors.textGrey) : null),
       ),
     );
   }
@@ -135,29 +210,8 @@ class LoginScreen extends StatelessWidget {
   Widget _buildDivider() {
     return Row(children: [
       const Expanded(child: Divider(color: AppColors.borderColor)),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('Hoặc tiếp tục với', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.textGrey, fontWeight: FontWeight.w600))),
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('Hoặc', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.textGrey, fontWeight: FontWeight.w600))),
       const Expanded(child: Divider(color: AppColors.borderColor)),
     ]);
-  }
-
-  Widget _buildGoogleButton() {
-    return Container(
-      height: 56,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        border: Border.all(color: AppColors.borderColor),
-        borderRadius: BorderRadius.circular(16),
-        color: Colors.white,
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Logo Google giả lập bằng Icon nếu chưa có ảnh
-          const Icon(Icons.g_mobiledata, size: 32, color: Colors.blue), 
-          const SizedBox(width: 8),
-          Text('Tiếp tục với Google', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: AppColors.textDark)),
-        ],
-      ),
-    );
   }
 }
