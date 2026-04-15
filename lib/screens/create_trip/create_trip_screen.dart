@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:tri_go/constants.dart';
-import 'package:tri_go/models/trip.dart';
-import 'package:tri_go/data/mock_data.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 
 class CreateTripScreen extends StatefulWidget {
-  // THÊM BIẾN ĐỂ NHẬN DỮ LIỆU TỪ TRANG KHÁM PHÁ TRUYỀN SANG
   final String? initialDestination; 
-  
   const CreateTripScreen({super.key, this.initialDestination});
 
   @override
@@ -17,16 +15,15 @@ class CreateTripScreen extends StatefulWidget {
 
 class _CreateTripScreenState extends State<CreateTripScreen> {
   final TextEditingController _titleController = TextEditingController();
-  late TextEditingController _destinationController; // Dùng 'late' vì sẽ gán giá trị ở initState
-  final TextEditingController _budgetController = TextEditingController();
+  late TextEditingController _destinationController; 
 
   DateTime? _startDate;
   DateTime? _endDate;
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    // TỰ ĐỘNG ĐIỀN TÊN ĐỊA ĐIỂM NẾU CÓ
     _destinationController = TextEditingController(text: widget.initialDestination ?? '');
   }
 
@@ -37,13 +34,7 @@ class _CreateTripScreenState extends State<CreateTripScreen> {
       lastDate: DateTime(2030),
       builder: (context, child) {
         return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: AppColors.primary,
-              onPrimary: Colors.white,
-              onSurface: AppColors.textDark,
-            ),
-          ),
+          data: Theme.of(context).copyWith(colorScheme: const ColorScheme.light(primary: AppColors.primary, onPrimary: Colors.white, onSurface: AppColors.textDark)),
           child: child!,
         );
       },
@@ -57,30 +48,53 @@ class _CreateTripScreenState extends State<CreateTripScreen> {
     }
   }
 
-  void _submitTrip() {
-    if (_titleController.text.isEmpty || 
-        _destinationController.text.isEmpty || 
-        _budgetController.text.isEmpty || 
-        _startDate == null || 
-        _endDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng điền đầy đủ thông tin!')),
-      );
+  // --- HÀM LƯU CHUYẾN ĐI LÊN FIREBASE ---
+  Future<void> _submitTrip() async {
+    if (_destinationController.text.isEmpty || _startDate == null || _endDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn Điểm đến và Thời gian!')));
       return;
     }
 
-    final newTrip = Trip(
-      id: 'T_${DateTime.now().millisecondsSinceEpoch}',
-      title: _titleController.text,
-      destinationName: _destinationController.text,
-      imageUrl: 'https://picsum.photos/id/1015/800/600', 
-      startDate: _startDate!,
-      endDate: _endDate!,
-      budgetLimit: double.tryParse(_budgetController.text) ?? 0,
-    );
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
 
-    mockTrips.insert(0, newTrip);
-    Navigator.pop(context, true); 
+    setState(() => _isLoading = true);
+
+    try {
+      DatabaseReference tripRef = FirebaseDatabase.instance.ref('trips').push(); 
+      String randomImageUrl = 'https://picsum.photos/id/${DateTime.now().second + 100}/800/600';
+      
+      // Nếu không nhập tên chuyến đi, tự động lấy "Chuyến đi + Điểm đến"
+      String finalTitle = _titleController.text.trim();
+      if (finalTitle.isEmpty) {
+        finalTitle = 'Chuyến đi ${_destinationController.text.trim()}';
+      }
+
+      await tripRef.set({
+        'id': tripRef.key,
+        'title': finalTitle,
+        'destinationName': _destinationController.text.trim(),
+        'imageUrl': randomImageUrl,
+        'startDate': _startDate!.toIso8601String(),
+        'endDate': _endDate!.toIso8601String(),
+        'createdBy': currentUser.uid,
+        'createdAt': ServerValue.timestamp,
+        'currentFund': 0, // Mới tạo thì quỹ nhóm bằng 0
+        'totalExpense': 0, // Chi tiêu bằng 0
+        'members': {
+          currentUser.uid: true // BẠN LÀ THÀNH VIÊN ĐẦU TIÊN VÀ DUY NHẤT
+        }
+      });
+
+      if (mounted) {
+        Navigator.pop(context, true); 
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã tạo chuyến đi thành công!'), backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -88,14 +102,9 @@ class _CreateTripScreenState extends State<CreateTripScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new, color: AppColors.textDark),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text('Tạo chuyến đi mới', 
-          style: GoogleFonts.plusJakartaSans(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 18)),
+        backgroundColor: Colors.white, elevation: 0,
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textDark), onPressed: () => Navigator.pop(context)),
+        title: Text('Tạo chuyến đi mới', style: GoogleFonts.plusJakartaSans(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 18)),
         centerTitle: true,
       ),
       body: SingleChildScrollView(
@@ -103,7 +112,7 @@ class _CreateTripScreenState extends State<CreateTripScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildLabel('Tên chuyến đi'),
+            _buildLabel('Tên chuyến đi (Có thể bỏ qua)'),
             _buildTextField(controller: _titleController, hintText: 'VD: Mùa hè rực rỡ tại Đà Nẵng', icon: Icons.explore_outlined),
             const SizedBox(height: 24),
 
@@ -131,21 +140,16 @@ class _CreateTripScreenState extends State<CreateTripScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 24),
-
-            _buildLabel('Ngân sách dự kiến (VNĐ)'),
-            _buildTextField(controller: _budgetController, hintText: 'VD: 5000000', icon: Icons.account_balance_wallet_outlined, keyboardType: TextInputType.number),
             const SizedBox(height: 40),
 
             SizedBox(
               width: double.infinity, height: 56,
               child: ElevatedButton(
-                onPressed: _submitTrip,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                ),
-                child: Text('Khởi tạo hành trình', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                onPressed: _isLoading ? null : _submitTrip,
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                child: _isLoading 
+                    ? const CircularProgressIndicator(color: Colors.white) 
+                    : Text('Khởi tạo hành trình', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
               ),
             )
           ],

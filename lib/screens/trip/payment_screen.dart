@@ -1,431 +1,362 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-// IMPORT THƯ VIỆN ML KIT MỚI
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:tri_go/constants.dart';
 
 class PaymentScreen extends StatefulWidget {
-  const PaymentScreen({super.key});
+  final String tripId; 
+  const PaymentScreen({super.key, required this.tripId});
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  String _amount = "0";
-  final TextEditingController _noteController = TextEditingController(text: "Thanh toán hóa đơn");
+  final User? currentUser = FirebaseAuth.instance.currentUser;
+  final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _noteController = TextEditingController();
   
-  File? _selectedImage;
-  bool _isScanning = false;
-  String _scanStatus = "Đang khởi động Camera...";
-  bool _isSavingToFirebase = false; 
+  Map<String, dynamic>? _selectedShop;
+  File? _billImage;
+  bool _isProcessingImage = false;
   
-  List<dynamic> _scannedItems = [];
+  // BIẾN LƯU DANH SÁCH MÓN ĂN BÓC TÁCH ĐƯỢC
+  List<Map<String, dynamic>> _scannedItems = [];
 
-  // --- HÀM QUÉT ẢNH BẰNG GOOGLE ML KIT (BẢN NÂNG CẤP ĐỌC CHI TIẾT MÓN) ---
-  Future<void> _scanBillReal() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+  final List<Map<String, dynamic>> _fakeShops = [
+    {'account': '0123456789', 'name': 'Nhà hàng Hải Sản Cô Ba', 'bank': 'Vietcombank', 'owner': 'NGUYEN VAN A', 'logo': 'VCB', 'color': Colors.green},
+    {'account': '9876543210', 'name': 'Cà phê Mây Lang Thang', 'bank': 'TPBank', 'owner': 'TRAN THI B', 'logo': 'TPB', 'color': Colors.purple},
+    {'account': '1122334455', 'name': 'Siêu thị Tiện Lợi 24/7', 'bank': 'MoMo', 'owner': 'PHAM THI D', 'logo': 'MoMo', 'color': Colors.pink},
+    {'account': '5678901234', 'name': 'Vé tham quan Cáp Treo', 'bank': 'BIDV', 'owner': 'LE VAN C', 'logo': 'BIDV', 'color': Colors.blue.shade800},
+  ];
 
-    if (image != null) {
-      setState(() {
-        _selectedImage = File(image.path);
-        _isScanning = true;
-        _scanStatus = "Đang quét và bóc tách từng món...";
-      });
-
-      try {
-        final inputImage = InputImage.fromFilePath(image.path);
-        final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
-        final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
-
-        double maxAmount = 0;
-        List<dynamic> extractedItems = [];
-        String shopName = "Hóa đơn (ML Kit)";
-
-        // 1. Gom tất cả các dòng chữ lại
-        List<TextLine> allLines = [];
-        for (TextBlock block in recognizedText.blocks) {
-          allLines.addAll(block.lines);
-        }
-
-        // 2. Sắp xếp các dòng từ trên xuống dưới theo tọa độ Y
-        allLines.sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
-
-        // 3. Thuật toán ghép đôi thông minh (Tên món ăn + Giá tiền)
-        String lastSeenText = ""; // Biến nhớ tên món ăn ở dòng trên
-        RegExp extractPriceRegex = RegExp(r'\b\d{1,3}(?:[.,]\d{3})+\b|\b\d{4,}\b'); // Tìm số >= 1000
-
-        for (TextLine line in allLines) {
-          String text = line.text.trim();
-
-          Iterable<RegExpMatch> matches = extractPriceRegex.allMatches(text);
-          if (matches.isNotEmpty) {
-            // Tìm thấy một mức giá
-            String priceStr = matches.last.group(0)!.replaceAll(RegExp(r'[.,]'), '');
-            double price = double.tryParse(priceStr) ?? 0;
-
-            if (price > 1000) {
-              if (price > maxAmount) maxAmount = price;
-
-              // Tách chữ nằm cùng dòng với số tiền (nếu có)
-              String remainingText = text.replaceAll(extractPriceRegex, '').replaceAll(RegExp(r'[^a-zA-ZÀ-ỹ\s]'), '').trim();
-              String itemName = "";
-
-              if (remainingText.length > 2 && !remainingText.toLowerCase().contains("tổng")) {
-                itemName = remainingText; // Món ăn và giá nằm trên cùng 1 dòng
-              } else if (lastSeenText.length > 2 && !lastSeenText.toLowerCase().contains("tổng")) {
-                itemName = lastSeenText; // Món ăn nằm ở dòng ngay bên trên giá
-                lastSeenText = ""; // Dùng xong thì xóa trí nhớ
-              }
-
-              // Lọc bỏ các từ rác không phải món ăn
-              String lowerItem = itemName.toLowerCase();
-              if (itemName.isNotEmpty && !lowerItem.contains('thanh toán') && !lowerItem.contains('tiền') && !lowerItem.contains('vnd') && !lowerItem.contains('total') && !lowerItem.contains('cash')) {
-                extractedItems.add({
-                  "name": itemName,
-                  "qty": 1,
-                  "price": price
-                });
-              }
-            }
-          } else {
-            // Nếu dòng này không có số tiền, lưu nó lại làm "ứng cử viên" cho tên món ăn
-            if (text.length > 2 && !text.toLowerCase().contains("tổng") && !text.toLowerCase().contains("hóa đơn") && !text.toLowerCase().contains("hđ")) {
-              lastSeenText = text;
-            }
-          }
-        }
-
-        textRecognizer.close();
-        setState(() => _isScanning = false);
-
-        if (mounted) {
-          if (maxAmount == 0) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không tìm thấy số tiền nào trên ảnh!'), backgroundColor: Colors.orange));
-          } else {
-            // Gửi dữ liệu ra giao diện hiển thị
-            _showExtractedBillDialog({
-              "shopName": shopName,
-              "category": "Chi tiêu",
-              "totalAmount": maxAmount,
-              "items": extractedItems
-            });
-          }
-        }
-      } catch (e) {
-        setState(() => _isScanning = false);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi ML Kit: $e'), backgroundColor: Colors.red));
-        }
-      }
-    }
-  }
-
-  void _showExtractedBillDialog(Map<String, dynamic> billData) {
-    final String shopName = billData['shopName'] ?? "Không rõ tên quán";
-    final double totalScannedAmount = (double.tryParse(billData['totalAmount'].toString()) ?? 0);
-    final List<dynamic> scannedItems = billData['items'] ?? [];
-
+  void _showShopSelector() {
     showModalBottomSheet(
-      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      context: context, backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.85,
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
         padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('Chi tiết Hóa đơn', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.bold)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-              ],
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(8)),
-              child: Text('Đọc bằng ML Kit (Siêu tốc)', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.purple.shade700, fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 24),
-            Text('Nhận diện từ ảnh:', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
-            const Divider(height: 24),
-            Expanded(
-              child: scannedItems.isEmpty 
-              ? const Center(child: Text('Chỉ nhận diện được tổng tiền, không thấy món ăn rõ ràng.', textAlign: TextAlign.center))
-              : ListView.builder(
-                itemCount: scannedItems.length,
-                itemBuilder: (context, index) {
-                  final item = scannedItems[index];
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(child: Text('${item['name']}', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600), maxLines: 2)),
-                        Text('${_formatNumber(item['price'].toString())}đ', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-            const Divider(),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('TỔNG CỘNG', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold)),
-                Text('${_formatNumber(totalScannedAmount.toInt().toString())}đ', style: GoogleFonts.plusJakartaSans(fontSize: 24, fontWeight: FontWeight.w800, color: const Color(0xFF1999B3))),
-              ],
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity, height: 56,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  setState(() {
-                    _amount = totalScannedAmount.toInt().toString();
-                    _noteController.text = "Thanh toán bill quét ảnh";
-                    _scannedItems = scannedItems;
-                  });
-                  _showSuccessDialog(context);
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF111617), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                child: Text('Đồng ý & Chuẩn bị Lưu', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-              ),
-            )
+            Text('Chọn đơn vị thụ hưởng', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            ..._fakeShops.map((shop) => ListTile(
+              onTap: () { setState(() => _selectedShop = shop); Navigator.pop(context); },
+              contentPadding: EdgeInsets.zero,
+              leading: Container(width: 48, height: 48, decoration: BoxDecoration(color: shop['color'].withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: Center(child: Text(shop['logo'], style: TextStyle(color: shop['color'], fontWeight: FontWeight.bold)))),
+              title: Text(shop['name'], style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
+              subtitle: Text('${shop['bank']} - ${shop['account']}'),
+            ))
           ],
         ),
       ),
     );
   }
 
-  void _onNumPress(String val) {
-    setState(() {
-      if (val == "DEL") {
-        if (_amount.length > 1) {
-          _amount = _amount.substring(0, _amount.length - 1);
-        } else {
-          _amount = "0";
-        }
-      } else if (val == "000") {
-        if (_amount != "0") _amount += "000";
-      } else {
-        if (_amount == "0") {
-          _amount = val;
-        } else if (_amount.length < 9) _amount += val;
-      }
+  // --- AI QUÉT BILL VÀ BÓC TÁCH MÓN ĂN (SIÊU CHUẨN) ---
+  Future<void> _scanBill() async {
+    final image = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (image == null) return;
+
+    setState(() { 
+      _billImage = File(image.path); 
+      _isProcessingImage = true; 
+      _scannedItems.clear(); // Xóa list cũ
     });
-  }
 
-  String _formatNumber(String s) {
-    if (s == "0") return "0";
-    final number = double.tryParse(s)?.toInt() ?? 0;
-    return number.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.');
-  }
+    try {
+      final inputImage = InputImage.fromFilePath(image.path);
+      final textRecognizer = TextRecognizer();
+      final recognizedText = await textRecognizer.processImage(inputImage);
+      
+      List<Map<String, dynamic>> tempItems = [];
+      // Regex lấy số tiền có format chuẩn (VD: 25,000 hoặc 50.000)
+      RegExp currencyRegex = RegExp(r'\b(\d{1,3}(?:[.,]\d{3})+)\b');
 
-  Future<void> _showSuccessDialog(BuildContext parentContext) async {
-    final bool? isSuccess = await showDialog<bool>(
-      context: parentContext, barrierDismissible: false,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (BuildContext stfContext, StateSetter setStateDialog) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)), contentPadding: const EdgeInsets.all(24),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(width: 80, height: 80, decoration: BoxDecoration(color: Colors.green.shade100, shape: BoxShape.circle), child: const Icon(Icons.check, color: Colors.green, size: 40)),
-                const SizedBox(height: 16),
-                Text('Xác nhận lưu trữ', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 24),
-                Container(
-                  padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(16)),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Tổng cộng', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey)),
-                          Text('${_formatNumber(_amount)}đ', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.green)),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Nội dung', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey)),
-                          Expanded(child: Text(_noteController.text, textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600))),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity, height: 48,
-                  child: ElevatedButton(
-                    onPressed: _isSavingToFirebase ? null : () async {
-                      setStateDialog(() => _isSavingToFirebase = true);
-                      try {
-                        DatabaseReference ref = FirebaseDatabase.instance.ref("expenses").push();
-                        await ref.set({
-                          'amount': double.parse(_amount),
-                          'note': _noteController.text,
-                          'items': _scannedItems, 
-                          'timestamp': ServerValue.timestamp, 
-                          'createdAt': DateTime.now().toIso8601String(),
-                        });
-                        if (dialogContext.mounted) Navigator.pop(dialogContext, true); 
-                      } catch (e) {
-                        setStateDialog(() => _isSavingToFirebase = false);
-                        if (dialogContext.mounted) ScaffoldMessenger.of(dialogContext).showSnackBar(SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red));
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF111617), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                    child: _isSavingToFirebase ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : Text('Đẩy lên Đám Mây', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: Colors.white)),
-                  ),
-                )
-              ],
-            ),
-          );
+      for (TextBlock block in recognizedText.blocks) {
+        for (TextLine line in block.lines) {
+          String text = line.text;
+          String textLower = text.toLowerCase();
+
+          // 1. NÉ RÁC: Bỏ qua ngày tháng, sđt, giờ
+          if (textLower.contains('ngày') || textLower.contains('date') || textLower.contains('giờ') || 
+              textLower.contains('đt') || textLower.contains('hotline') || textLower.contains('hđ') || 
+              text.contains(':') || text.contains('/')) {
+            continue; 
+          }
+
+          // 2. TÌM GIÁ TIỀN & TÊN MÓN TƯƠNG ỨNG TRÊN CÙNG 1 DÒNG
+          Iterable<RegExpMatch> matches = currencyRegex.allMatches(text);
+          if (matches.isNotEmpty) {
+            List<double> linePrices = [];
+            String nameStr = text;
+
+            // Rút toàn bộ số tiền ra khỏi chuỗi (VD: rút "25,000" và "50,000")
+            for (var m in matches) {
+              String priceStr = m.group(1)!.replaceAll(RegExp(r'[.,]'), '');
+              double price = double.parse(priceStr);
+              linePrices.add(price);
+              nameStr = nameStr.replaceAll(m.group(0)!, ''); // Xóa số tiền khỏi chuỗi
+            }
+
+            // Lọc tên món: Xóa Số lượng, Số thứ tự (VD: "1) ", "2"), và dấu câu
+            nameStr = nameStr.replaceAll(RegExp(r'\d+'), ''); // Xóa mọi chữ số (SL, STT)
+            nameStr = nameStr.replaceAll(RegExp(r'[.,)\]\[}:;\-]'), ''); // Xóa dấu câu
+            nameStr = nameStr.trim();
+
+            // Nếu tên món sau khi lọc còn ý nghĩa, và không phải là chữ Tổng Cộng
+            if (nameStr.length > 1 && !nameStr.toLowerCase().contains('cộng') && !nameStr.toLowerCase().contains('tổng') && !nameStr.toLowerCase().contains('tiền')) {
+              // Nếu 1 dòng có 2 mức giá (VD: Đơn giá và Tổng giá), ta lấy mức cao nhất làm tổng giá của món đó
+              double itemPrice = linePrices.reduce((a, b) => a > b ? a : b);
+              
+              if (itemPrice < 100000000) { // Né mã vạch
+                tempItems.add({'name': nameStr, 'price': itemPrice});
+              }
+            }
+          }
         }
-      ),
-    );
+      }
 
-    if (isSuccess == true && parentContext.mounted) {
-      ScaffoldMessenger.of(parentContext).showSnackBar(const SnackBar(content: Text('Đã lưu dữ liệu!'), backgroundColor: Colors.green));
-      Navigator.pop(parentContext, double.parse(_amount));
+      // 3. TÌM RA TỔNG CỘNG CỦA HÓA ĐƠN
+      double maxAmount = 0;
+      if (tempItems.isNotEmpty) {
+        maxAmount = tempItems.map((e) => e['price'] as double).reduce((a, b) => a > b ? a : b);
+        
+        // Loại bỏ dòng Tổng tiền ra khỏi danh sách món ăn (để list bên dưới chỉ toàn món thật)
+        tempItems.removeWhere((item) => item['price'] == maxAmount);
+
+        setState(() {
+          _amountController.text = maxAmount.toInt().toString();
+          _scannedItems = tempItems;
+        });
+      } else {
+        // Fallback: Tìm con số lớn nhất nếu format bill không có tên món cùng dòng
+        for (TextBlock block in recognizedText.blocks) {
+          for (TextLine line in block.lines) {
+            Iterable<RegExpMatch> matches = currencyRegex.allMatches(line.text);
+            for (var m in matches) {
+              double val = double.parse(m.group(1)!.replaceAll(RegExp(r'[.,]'), ''));
+              if (val > maxAmount && val < 100000000) maxAmount = val;
+            }
+          }
+        }
+        if (maxAmount > 0) {
+          setState(() => _amountController.text = maxAmount.toInt().toString());
+        } else {
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không bóc tách được món ăn! Vui lòng nhập thủ công.')));
+        }
+      }
+      textRecognizer.close();
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi quét: $e')));
+    } finally {
+      if (mounted) setState(() => _isProcessingImage = false);
+    }
+  }
+
+  Future<void> _executePayment() async {
+    if (_selectedShop == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn người nhận!'), backgroundColor: Colors.orange));
+      return;
+    }
+    double? amount = double.tryParse(_amountController.text);
+    if (amount == null || amount <= 0) return;
+
+    showDialog(context: context, barrierDismissible: false, builder: (context) => const Center(child: CircularProgressIndicator()));
+
+    try {
+      final String uid = currentUser!.uid;
+      final userSnap = await FirebaseDatabase.instance.ref('users/$uid').get();
+      String payerName = userSnap.exists ? (userSnap.value as Map)['displayName'] ?? 'Thành viên' : 'Thành viên';
+
+      final tripRef = FirebaseDatabase.instance.ref('trips/${widget.tripId}');
+      final tripSnap = await tripRef.get();
+      
+      if (tripSnap.exists) {
+        final tripData = tripSnap.value as Map<dynamic, dynamic>;
+        double currentFund = double.parse((tripData['currentFund'] ?? 0).toString());
+        double totalExpense = double.parse((tripData['totalExpense'] ?? 0).toString());
+        
+        if (amount > (currentFund - totalExpense)) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Quỹ nhóm không đủ tiền! Hãy nạp thêm.'), backgroundColor: Colors.red));
+          return;
+        }
+
+        await tripRef.child('totalExpense').set(totalExpense + amount);
+        
+        // ĐẨY LUÔN DANH SÁCH MÓN ĂN VÀO KHOẢN CHI NÀY
+        await tripRef.child('expenses').push().set({
+          'shopName': _selectedShop!['name'],
+          'bankName': _selectedShop!['bank'],
+          'amount': amount,
+          'note': _noteController.text.isEmpty ? 'Thanh toán dịch vụ' : _noteController.text,
+          'billImage': _billImage?.path ?? '', 
+          'payerName': payerName,
+          'items': _scannedItems, // LƯU CHI TIẾT MÓN LÊN FIREBASE ĐỂ TRANG QUỸ XỔ RA
+          'timestamp': ServerValue.timestamp,
+        });
+
+        if (mounted) {
+          Navigator.pop(context); 
+          Navigator.pop(context); 
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Thanh toán thành công!'), backgroundColor: Colors.green));
+        }
+      }
+    } catch (e) {
+      Navigator.pop(context);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isScanning) {
-      return Scaffold(
-        backgroundColor: Colors.white,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(color: Colors.purple),
-              const SizedBox(height: 24),
-              Text('ML Kit đang quét chữ...', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.purple.shade700)),
-              Text(_scanStatus, style: GoogleFonts.plusJakartaSans(fontSize: 14, color: Colors.grey)),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         backgroundColor: Colors.white, elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black54), onPressed: () => Navigator.pop(context)),
-        title: Text('Nhập khoản chi', style: GoogleFonts.plusJakartaSans(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16)),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textDark), onPressed: () => Navigator.pop(context)),
+        title: Text('Thanh toán Dịch vụ', style: GoogleFonts.plusJakartaSans(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 18)),
         centerTitle: true,
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: InkWell(
-              onTap: _scanBillReal,
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                width: double.infinity, padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.purple.shade300, style: BorderStyle.solid)),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.document_scanner, color: Colors.purple.shade700),
-                    const SizedBox(width: 8),
-                    Text('Quét Hóa Đơn (Bằng ML Kit)', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: Colors.purple.shade700)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          
-          Row(
-            children: [
-              Expanded(child: Container(height: 1, color: Colors.grey.shade200)),
-              Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('Hoặc nhập thủ công', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey))),
-              Expanded(child: Container(height: 1, color: Colors.grey.shade200)),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-          Text('SỐ TIỀN CHI TIÊU', style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey.shade400, letterSpacing: 2)),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_formatNumber(_amount), style: GoogleFonts.plusJakartaSans(fontSize: 48, fontWeight: FontWeight.bold, color: Colors.black, height: 1)),
-              const SizedBox(width: 4),
-              Text('đ', style: GoogleFonts.plusJakartaSans(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black)),
-            ],
-          ),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Text('NỘI DUNG', style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey.shade400)),
-                TextField(
-                  controller: _noteController,
-                  style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w500),
-                  decoration: InputDecoration(
-                    border: UnderlineInputBorder(borderSide: BorderSide(color: Colors.grey.shade200)),
-                    focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: Colors.purple)),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đang mở Camera quét QR...'))),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.blue.shade200)),
+                      child: Column(children: [const Icon(Icons.qr_code_scanner, color: Colors.blue, size: 32), const SizedBox(height: 8), Text('Quét mã QR', style: GoogleFonts.plusJakartaSans(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 12))]),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: InkWell(
+                    onTap: _scanBill,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withOpacity(0.3))),
+                      child: Column(
+                        children: [
+                          _isProcessingImage 
+                            ? const SizedBox(height: 32, width: 32, child: CircularProgressIndicator(strokeWidth: 2)) 
+                            : const Icon(Icons.document_scanner, color: AppColors.primary, size: 32), 
+                          const SizedBox(height: 8), 
+                          // BỎ CHỮ AI NHƯ SẾP YÊU CẦU
+                          Text('Quét Hóa Đơn', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 12))
+                        ]
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
-          ),
+            
+            if (_billImage != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: Row(
+                  children: [
+                    ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.file(_billImage!, height: 50, width: 50, fit: BoxFit.cover)),
+                    const SizedBox(width: 12),
+                    const Text('Đã đính kèm ảnh hóa đơn ✅', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12))
+                  ],
+                ),
+              ),
 
-          const Spacer(),
+            // HIỂN THỊ CÁC MÓN ĂN VỪA BÓC TÁCH ĐƯỢC
+            if (_scannedItems.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.orange.shade200)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Đã bóc tách ${_scannedItems.length} món:', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange.shade800)),
+                    const SizedBox(height: 12),
+                    ..._scannedItems.map((item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(child: Text(item['name'], style: const TextStyle(fontSize: 13, color: Colors.black87), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          Text('${item['price'].toInt()}đ', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    )),
+                  ],
+                ),
+              ),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: GridView.count(
-              shrinkWrap: true, crossAxisCount: 3, childAspectRatio: 2, mainAxisSpacing: 10, crossAxisSpacing: 10, physics: const NeverScrollableScrollPhysics(),
-              children: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', 'DEL'].map((key) {
-                return InkWell(
-                  onTap: () => _onNumPress(key),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Center(
-                    child: key == 'DEL' ? const Icon(Icons.backspace_outlined, color: Colors.grey) : Text(key, style: GoogleFonts.plusJakartaSans(fontSize: 24, fontWeight: FontWeight.w500)),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: SizedBox(
-              width: double.infinity, height: 56,
-              child: ElevatedButton(
-                onPressed: () {
-                  if (_amount == "0") return;
-                  if (_amount != "0" && _scannedItems.isNotEmpty && _noteController.text == "Thanh toán hóa đơn") {
-                    _scannedItems = []; 
-                  }
-                  _showSuccessDialog(context);
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF111617), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                child: Text('Cập nhật', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+            const SizedBox(height: 24),
+            Text('THÔNG TIN NGƯỜI NHẬN', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: _showShopSelector,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+                child: _selectedShop == null 
+                  ? Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Bấm để chọn Tài khoản nhận', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.bold)), const Icon(Icons.contacts, color: AppColors.primary)])
+                  : Row(
+                      children: [
+                        Container(width: 48, height: 48, decoration: BoxDecoration(color: _selectedShop!['color'].withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: Center(child: Text(_selectedShop!['logo'], style: TextStyle(color: _selectedShop!['color'], fontWeight: FontWeight.bold)))),
+                        const SizedBox(width: 16),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(_selectedShop!['name'], style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 16, color: AppColors.textDark)),
+                          Text('${_selectedShop!['bank']} - ${_selectedShop!['account']}', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey.shade600)),
+                        ])),
+                        const Icon(Icons.edit, color: Colors.grey, size: 20)
+                      ],
+                    ),
               ),
             ),
-          )
-        ],
+            
+            const SizedBox(height: 24),
+            Text('CHI TIẾT GIAO DỊCH', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _amountController, keyboardType: TextInputType.number,
+                    style: GoogleFonts.plusJakartaSans(fontSize: 28, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    decoration: const InputDecoration(labelText: 'Số tiền (VNĐ)', border: InputBorder.none, prefixIcon: Icon(Icons.monetization_on, color: AppColors.primary)),
+                  ),
+                  const Divider(height: 20),
+                  TextField(
+                    controller: _noteController,
+                    decoration: const InputDecoration(labelText: 'Nội dung (Tùy chọn)', border: InputBorder.none, prefixIcon: Icon(Icons.edit_note, color: Colors.grey)),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 40),
+            SizedBox(
+              width: double.infinity, height: 56,
+              child: ElevatedButton(
+                onPressed: _executePayment,
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                child: const Text('Xác nhận & Trừ Quỹ', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            )
+          ],
+        ),
       ),
     );
   }
