@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:io';
+import 'dart:async'; 
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
@@ -30,6 +31,13 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   double _currentTotalExpense = 0; 
   double _currentFund = 0; 
 
+  StreamSubscription<DatabaseEvent>? _tripSubscription;
+  StreamSubscription<DatabaseEvent>? _friendsSubscription;
+
+  int _currentRating = 0; 
+  bool _isReviewSubmitted = false;
+  String _creatorId = ""; // CHÈN THÊM DÒNG NÀY VÀO ĐÂY
+
   @override
   void initState() {
     super.initState();
@@ -37,52 +45,217 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     _fetchMyFriends(); 
   }
 
+  @override
+  void dispose() {
+    _tripSubscription?.cancel();
+    _friendsSubscription?.cancel();
+    super.dispose();
+  }
+
   void _fetchMyFriends() {
     if (currentUser == null) return;
-    FirebaseDatabase.instance.ref('users/${currentUser!.uid}/friends').onValue.listen((event) {
-      if (event.snapshot.value != null) {
+    _friendsSubscription = FirebaseDatabase.instance.ref('users/${currentUser!.uid}/friends').onValue.listen((event) {
+      if (event.snapshot.value != null && mounted) {
         Map<dynamic, dynamic> friendsMap = event.snapshot.value as Map<dynamic, dynamic>;
-        if (mounted) setState(() => _myFriends = friendsMap.keys.cast<String>().toList());
+        setState(() => _myFriends = friendsMap.keys.cast<String>().toList());
       }
     });
   }
 
   void _listenToTripData() {
-    DatabaseReference tripRef = FirebaseDatabase.instance.ref('trips/${widget.trip.id}');
-    tripRef.onValue.listen((event) async {
-      if (event.snapshot.value != null) {
-        final data = event.snapshot.value as Map<dynamic, dynamic>;
-        
-        if (mounted) {
-          setState(() {
-             _currentTotalExpense = double.parse((data['totalExpense'] ?? 0).toString());
-             _currentFund = double.parse((data['currentFund'] ?? 0).toString());
-          });
-        }
+    _tripSubscription = FirebaseDatabase.instance.ref('trips/${widget.trip.id}').onValue.listen((event) async {
+      if (!mounted || event.snapshot.value == null) return;
+      final data = event.snapshot.value as Map<dynamic, dynamic>;
+      
+      if (mounted) {
+        setState(() {
+           _currentTotalExpense = double.tryParse(data['totalExpense'].toString()) ?? 0;
+           _currentFund = double.tryParse(data['currentFund'].toString()) ?? 0;
+           
+           // DÒNG QUAN TRỌNG NHẤT ĐÂY SẾP:
+           _creatorId = data['createdBy']?.toString() ?? "";
+           
+           if (currentUser != null && data['reviewedBy'] != null && data['reviewedBy'][currentUser!.uid] == true) {
+             _isReviewSubmitted = true;
+           }
+        });
+      }
 
-        if (data['members'] != null) {
-          Map<dynamic, dynamic> membersMap = data['members'];
-          List<Map<dynamic, dynamic>> tempMembers = [];
-          for (String uid in membersMap.keys) {
-            final userSnap = await FirebaseDatabase.instance.ref('users/$uid').get();
-            if (userSnap.exists) {
-              tempMembers.add({'uid': uid, ...userSnap.value as Map<dynamic, dynamic>});
-            }
+      if (data['members'] != null) {
+        Map<dynamic, dynamic> membersMap = data['members'];
+        List<Map<dynamic, dynamic>> tempMembers = [];
+        for (String uid in membersMap.keys) {
+          final userSnap = await FirebaseDatabase.instance.ref('users/$uid').get();
+          if (userSnap.exists && mounted) {
+            tempMembers.add({'uid': uid, ...userSnap.value as Map<dynamic, dynamic>});
           }
-          if (mounted) setState(() => _realMembers = tempMembers);
         }
+        if (mounted) setState(() => _realMembers = tempMembers);
       }
     });
   }
 
-  // --- HÀM NẠP QUỸ (BẢN TỐI ƯU SIÊU NHẸ CHỐNG ĐƠ MÁY) ---
+  // --- HÀM TỰ RỜI NHÓM (DÀNH CHO THÀNH VIÊN) ---
+Future<void> _confirmLeaveTrip() async {
+    bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Xác nhận rời nhóm?'),
+        content: const Text('Hệ thống sẽ tính toán và hoàn trả lại số tiền bạn đã đóng vào quỹ nhóm.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+            child: const Text('Rời đi', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && currentUser != null) {
+      // Hiện loading
+      showDialog(context: context, barrierDismissible: false, builder: (context) => const Center(child: CircularProgressIndicator()));
+      
+      final messenger = ScaffoldMessenger.of(context);
+      final nav = Navigator.of(context); // Giữ lại navigator để pop cho chuẩn
+
+      try {
+        double userTotalContributed = 0;
+        print("DEBUG: Bắt đầu quét tiền hoàn trả...");
+
+        final contributionsSnap = await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/contributions').get();
+        
+        if (contributionsSnap.exists) {
+          Map<dynamic, dynamic> contriData = contributionsSnap.value as Map<dynamic, dynamic>;
+          contriData.forEach((key, value) {
+            // Check UID hoặc check Tên nếu sếp chưa kịp sửa UID
+            if (value['uid'] == currentUser!.uid) {
+              userTotalContributed += double.tryParse(value['amount'].toString()) ?? 0;
+            }
+          });
+        }
+        print("DEBUG: Tổng tiền sếp đóng là: $userTotalContributed");
+
+        // 1. Xóa mình khỏi danh sách thành viên
+        await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/members/${currentUser!.uid}').remove();
+        
+        if (userTotalContributed > 0) {
+          // 2. Trừ tiền khỏi tổng quỹ chuyến đi
+          await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/currentFund').set(_currentFund - userTotalContributed);
+          
+          // 3. Trả tiền về ví cá nhân
+          final userRef = FirebaseDatabase.instance.ref('users/${currentUser!.uid}');
+          final userSnap = await userRef.child('balance').get();
+          double bal = userSnap.exists ? double.parse(userSnap.value.toString()) : 0;
+          
+          await userRef.child('balance').set(bal + userTotalContributed);
+          
+          // 4. Lưu lịch sử giao dịch
+          await userRef.child('transactions').push().set({
+            'type': 'REFUND',
+            'title': 'Rời chuyến đi: ${widget.trip.title}',
+            'amount': userTotalContributed,
+            'timestamp': ServerValue.timestamp,
+            'isPositive': true
+          });
+        }
+
+        if (mounted) {
+          nav.pop(); // Tắt cái vòng tròn loading
+          nav.pop(); // Thoát hẳn màn hình chi tiết về Home
+          messenger.showSnackBar(SnackBar(
+            content: Text('Đã rời nhóm! Đã trả lại ${_formatCurrency(userTotalContributed)} vào ví.'),
+            backgroundColor: Colors.orange,
+          ));
+        }
+      } catch (e) {
+        print("DEBUG: Lỗi cmnr: $e");
+        if (mounted) nav.pop(); // Tắt loading nếu lỗi
+        messenger.showSnackBar(SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  // --- HÀM MỚI: KÍCH THÀNH VIÊN VÀ HOÀN TIỀN ---
+  void _showKickDialog(String uid, String name) {
+    if (uid == currentUser?.uid) return; 
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        final messenger = ScaffoldMessenger.of(context);
+        return AlertDialog(
+          title: const Text('Xóa thành viên', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          content: Text('Bạn muốn xóa $name?\n\nTiền người này đã đóng thực tế sẽ được hoàn trả.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () async {
+                Navigator.pop(context);
+                double userTotalContributed = 0;
+                
+                try {
+                  final contributionsSnap = await FirebaseDatabase.instance
+                      .ref('trips/${widget.trip.id}/contributions').get();
+                  
+                  if (contributionsSnap.exists) {
+                    Map<dynamic, dynamic> contriData = contributionsSnap.value as Map<dynamic, dynamic>;
+                    contriData.forEach((key, value) {
+                      // SO SÁNH THEO UID LÀ CHUẨN 100%
+                      if (value['uid'] == uid) {
+                        userTotalContributed += double.tryParse(value['amount'].toString()) ?? 0;
+                      }
+                    });
+                  }
+
+                  // Xóa khỏi nhóm
+                  await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/members/$uid').remove();
+                  
+                  if (userTotalContributed > 0) {
+                    // Trừ quỹ nhóm
+                    await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/currentFund').set(_currentFund - userTotalContributed);
+                    // Trả lại ví người bị xóa
+                    final userRef = FirebaseDatabase.instance.ref('users/$uid');
+                    final userSnap = await userRef.child('balance').get();
+                    double currentBal = userSnap.exists ? double.parse(userSnap.value.toString()) : 0;
+                    await userRef.child('balance').set(currentBal + userTotalContributed);
+                    
+                    await userRef.child('transactions').push().set({
+                      'type': 'REFUND',
+                      'title': 'Hoàn tiền rời chuyến (${widget.trip.title})',
+                      'amount': userTotalContributed,
+                      'timestamp': ServerValue.timestamp,
+                      'isPositive': true
+                    });
+                  }
+
+                  messenger.showSnackBar(SnackBar(
+                    content: Text('Đã xóa $name. Đã trả lại ${_formatCurrency(userTotalContributed)} cho họ!'), 
+                    backgroundColor: Colors.green
+                  ));
+
+                } catch (e) {
+                  messenger.showSnackBar(SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red));
+                }
+              },
+              child: const Text('Xác nhận', style: TextStyle(color: Colors.white)),
+            )
+          ]
+        );
+      }
+    );
+  }
+
   void _showTopUpFundDialog() {
     final TextEditingController amountController = TextEditingController();
-    bool isSubmitting = false; // Biến trạng thái để xoay loading trên nút
+    bool isSubmitting = false; 
 
     showDialog(
       context: context,
-      barrierDismissible: false, // Bắt buộc phải bấm Hủy hoặc Xác nhận
+      barrierDismissible: false, 
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
@@ -109,10 +282,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   double? amount = double.tryParse(amountController.text);
                   if (amount == null || amount <= 0 || currentUser == null) return;
 
-                  // 1. TỰ ĐỘNG CỤP BÀN PHÍM XUỐNG ĐỂ TRÁNH LAG TRÀN RAM
                   FocusManager.instance.primaryFocus?.unfocus();
-                  
-                  // 2. Đổi trạng thái thành đang load
                   setDialogState(() => isSubmitting = true);
 
                   final userRef = FirebaseDatabase.instance.ref('users/${currentUser!.uid}');
@@ -123,29 +293,30 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                     double personalBalance = double.parse((userData['balance'] ?? 0).toString());
                     String myName = userData['displayName'] ?? 'Thành viên';
 
-                    // KIỂM TRA SỐ DƯ VÍ
                     if (amount > personalBalance) {
-                      setDialogState(() => isSubmitting = false); // Tắt loading
+                      setDialogState(() => isSubmitting = false); 
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ví không đủ tiền! Hãy nạp ví trước.'), backgroundColor: Colors.red));
                       return;
                     }
 
                     try {
-                      // Trừ tiền ví cá nhân & Ghi lịch sử cá nhân
                       await userRef.child('balance').set(personalBalance - amount);
                       await userRef.child('transactions').push().set({
                         'type': 'FUND_CONTRIBUTION', 'title': 'Đóng quỹ', 'amount': amount, 'timestamp': ServerValue.timestamp, 'isPositive': false
                       });
                       
-                      // Cộng tiền vào Quỹ Nhóm & Ghi lịch sử nhóm
+                      // Sửa đoạn này trong hàm _showTopUpFundDialog sếp nhé
                       final tripRef = FirebaseDatabase.instance.ref('trips/${widget.trip.id}');
                       await tripRef.child('currentFund').set(_currentFund + amount);
                       await tripRef.child('contributions').push().set({
-                        'contributorName': myName, 'amount': amount, 'timestamp': ServerValue.timestamp
+                        'uid': currentUser!.uid, // THÊM DÒNG NÀY VÀO ĐỂ HOÀN TIỀN CHÍNH XÁC
+                        'contributorName': myName, 
+                        'amount': amount, 
+                        'timestamp': ServerValue.timestamp
                       });
 
                       if (dialogContext.mounted) {
-                        Navigator.pop(dialogContext); // Chỉ cần tắt cái dialog này đi là xong
+                        Navigator.pop(dialogContext); 
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đóng quỹ thành công!'), backgroundColor: Colors.green));
                       }
                     } catch (e) {
@@ -159,7 +330,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   }
                 },
                 style: ElevatedButton.styleFrom(backgroundColor: primaryColor),
-                // Hiển thị vòng xoay bên trong cái nút luôn
                 child: isSubmitting 
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                     : const Text('Xác nhận Đóng', style: TextStyle(color: Colors.white)),
@@ -171,10 +341,10 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     );
   }
 
+  // --- HÀM MỜI ĐÃ SỬA: ĐẨY VÀO pendingMembers ---
   void _showInviteBottomSheet() {
     List<Map<dynamic, dynamic>> searchResults = [];
     bool isSearching = false;
-    List<String> sentRequests = []; 
 
     showModalBottomSheet(
       context: context,
@@ -193,7 +363,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Thêm người', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.bold, color: textDark)),
+                      Text('Thêm thành viên', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.bold, color: textDark)),
                       IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
                     ],
                   ),
@@ -244,8 +414,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         String uid = user['uid'];
                         
                         bool isAlreadyInTrip = _realMembers.any((member) => member['uid'] == uid);
-                        bool isFriend = _myFriends.contains(uid);
-                        bool isRequestSent = sentRequests.contains(uid);
 
                         String avatarPath = user['avatar'] ?? '';
                         String name = user['displayName'] ?? user['email'] ?? 'User';
@@ -262,25 +430,18 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                           
                           trailing: isAlreadyInTrip
                             ? Text('Đã tham gia', style: GoogleFonts.plusJakartaSans(color: Colors.grey, fontWeight: FontWeight.bold))
-                            : isFriend 
-                              ? ElevatedButton( 
-                                  onPressed: () async {
-                                    await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/members/$uid').set(true);
-                                    setModalState(() {}); 
-                                  },
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green.withOpacity(0.1), elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
-                                  child: Text('Mời nhóm', style: GoogleFonts.plusJakartaSans(color: Colors.green, fontWeight: FontWeight.bold)),
-                                )
-                              : isRequestSent
-                                ? Text('Đã gửi KB', style: GoogleFonts.plusJakartaSans(color: Colors.orange, fontWeight: FontWeight.bold))
-                                : ElevatedButton( 
-                                    onPressed: () async {
-                                      await FirebaseDatabase.instance.ref('users/$uid/friendRequests/${currentUser!.uid}').set(true);
-                                      setModalState(() => sentRequests.add(uid)); 
-                                    },
-                                    style: ElevatedButton.styleFrom(backgroundColor: primaryColor, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
-                                    child: Text('Kết bạn', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold)),
-                                  ),
+                            : ElevatedButton( 
+                                onPressed: () async {
+                                  // ĐẨY VÀO PENDING MEMBERS ĐỂ BÊN KIA XÁC NHẬN
+                                  await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/pendingMembers/$uid').set(true);
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Đã gửi lời mời đến $name!'), backgroundColor: Colors.green));
+                                  }
+                                },
+                                style: ElevatedButton.styleFrom(backgroundColor: primaryColor, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+                                child: Text('Gửi lời mời', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold)),
+                              ),
                         );
                       },
                     ),
@@ -294,7 +455,10 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     );
   }
 
-  void _showMoreOptions() {
+void _showMoreOptions() {
+    // So sánh UID của sếp với UID người tạo chuyến đi
+    bool isCreator = _creatorId == currentUser?.uid;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -307,22 +471,27 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           children: [
             Text('Tùy chọn chuyến đi', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            ListTile(
-              leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.delete, color: Colors.red)),
-              title: Text('Xóa & Hoàn tiền', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: Colors.red)),
-              subtitle: Text('Hủy chuyến đi và chia lại quỹ', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey)),
-              onTap: () {
-                Navigator.pop(context); 
-                _confirmDeleteTrip(); 
-              },
-            ),
+            
+            if (isCreator) // NẾU LÀ CHỦ -> HIỆN NÚT XÓA
+              ListTile(
+                leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.delete, color: Colors.red)),
+                title: Text('Xóa & Hoàn tiền', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: Colors.red)),
+                subtitle: Text('Hủy chuyến đi và chia lại quỹ dư cho mọi người', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey)),
+                onTap: () { Navigator.pop(context); _confirmDeleteTrip(); },
+              )
+            else // NẾU LÀ KHÁCH -> HIỆN NÚT RỜI
+              ListTile(
+                leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.logout, color: Colors.orange)),
+                title: Text('Rời chuyến đi', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: Colors.orange)),
+                subtitle: Text('Bạn sẽ nhận lại số tiền thực tế đã đóng vào quỹ', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.grey)),
+                onTap: () { Navigator.pop(context); _confirmLeaveTrip(); },
+              ),
           ],
         ),
       ),
     );
   }
-
-  // --- HÀM XÓA CHUYẾN ĐI & HOÀN TIỀN TỰ ĐỘNG ---
+  
   Future<void> _confirmDeleteTrip() async {
     bool? confirm = await showDialog<bool>(
       context: context,
@@ -350,47 +519,38 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     if (confirm == true) {
       showDialog(context: context, barrierDismissible: false, builder: (context) => const Center(child: CircularProgressIndicator()));
       try {
-        // 1. TÍNH TOÁN TIỀN HOÀN TRẢ
         double remainingFund = _currentFund - _currentTotalExpense;
         
         if (remainingFund > 0 && _realMembers.isNotEmpty) {
-          // Chia đều số tiền dư cho các thành viên
           double refundPerPerson = remainingFund / _realMembers.length;
 
-          // Chạy vòng lặp cộng tiền cho từng người
           for (var member in _realMembers) {
             String uid = member['uid'];
             DatabaseReference userRef = FirebaseDatabase.instance.ref('users/$uid');
             
-            // Lấy số dư hiện tại của người đó
             final userSnap = await userRef.child('balance').get();
             double currentBalance = 0;
             if (userSnap.exists) {
               currentBalance = double.parse(userSnap.value.toString());
             }
 
-            // Cộng tiền trả lại ví
             await userRef.child('balance').set(currentBalance + refundPerPerson);
-            
-            // Ghi lịch sử giao dịch: Hoàn tiền
             await userRef.child('transactions').push().set({
               'type': 'REFUND',
               'title': 'Hoàn tiền hủy chuyến đi',
               'amount': refundPerPerson,
               'timestamp': ServerValue.timestamp,
-              'isPositive': true, // Dấu cộng màu xanh
+              'isPositive': true, 
             });
           }
         }
 
-        // 2. XÓA SẠCH DATA CHUYẾN ĐI
         await FirebaseDatabase.instance.ref('trips/${widget.trip.id}').remove();
         
         if (mounted) {
-          Navigator.pop(context); // Tắt loading
-          Navigator.pop(context); // Trở về trang Home
+          Navigator.pop(context); 
+          Navigator.pop(context); 
           
-          // Thông báo tùy theo việc có hoàn tiền hay không
           String message = remainingFund > 0 
             ? 'Đã xóa chuyến đi và hoàn lại ${_formatCurrency(remainingFund)} cho các thành viên!' 
             : 'Đã xóa chuyến đi thành công!';
@@ -403,6 +563,115 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi khi xóa: $e'), backgroundColor: Colors.red));
         }
       }
+    }
+  }
+
+  Widget _buildReviewSectionIfFinished() {
+    bool isFinished = DateTime.now().isAfter(widget.trip.endDate);
+    
+    if (!isFinished) return const SizedBox.shrink();
+
+    if (_isReviewSubmitted) {
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
+          child: Column(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.green, size: 40),
+              const SizedBox(height: 8),
+              Text('Bạn đã đánh giá chuyến đi này!', style: GoogleFonts.plusJakartaSans(color: Colors.green, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: coralColor.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: coralColor.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          children: [
+            Text('Chuyến đi đã kết thúc! ✨', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 8),
+            const Text('Đánh giá của bạn giúp cộng đồng có dự báo chi phí chính xác hơn.', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 16),
+            
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(5, (index) {
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _currentRating = index + 1;
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                    child: Icon(
+                      index < _currentRating ? Icons.star : Icons.star_border,
+                      color: coralColor,
+                      size: 40,
+                    ),
+                  ),
+                );
+              }),
+            ),
+            
+            const SizedBox(height: 16),
+            
+            if (_currentRating > 0)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: coralColor,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(vertical: 12)
+                  ),
+                  onPressed: () => _submitReview(),
+                  child: Text('Gửi đánh giá $_currentRating sao', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              )
+            else
+              Text('Chạm vào sao để đánh giá', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: coralColor, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submitReview() async {
+    if (currentUser == null) return;
+    double costPerPerson = _realMembers.isNotEmpty ? _currentFund / _realMembers.length : 0;
+    
+    try {
+      await FirebaseDatabase.instance.ref('reviews/${widget.trip.title}').push().set({
+        'stars': _currentRating,
+        'costPerPerson': costPerPerson,
+        'user': currentUser!.uid,
+        'tripId': widget.trip.id,
+        'timestamp': ServerValue.timestamp,
+      });
+
+      await FirebaseDatabase.instance.ref('trips/${widget.trip.id}/reviewedBy/${currentUser!.uid}').set(true);
+      
+      if (mounted) {
+        setState(() {
+          _isReviewSubmitted = true; 
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã gửi đánh giá thành công!'), backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      debugPrint('Lỗi review: $e');
     }
   }
 
@@ -446,7 +715,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   height: 300, width: double.infinity,
                   decoration: BoxDecoration(image: DecorationImage(image: widget.trip.imageUrl.startsWith('http') ? NetworkImage(widget.trip.imageUrl) : AssetImage(widget.trip.imageUrl) as ImageProvider, fit: BoxFit.cover)),
                 ),
-                Container(height: 300, decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withOpacity(0.3), Colors.transparent, Colors.white], stops: const [0.0, 0.5, 1.0]))),
+                Container(height: 300, decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black.withValues(alpha: 0.3), Colors.transparent, Colors.white], stops: const [0.0, 0.5, 1.0]))),
                 Positioned(
                   top: 50, left: 16, right: 16,
                   child: Row(
@@ -469,14 +738,13 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(widget.trip.title, style: GoogleFonts.plusJakartaSans(fontSize: 28, fontWeight: FontWeight.w800, color: textDark), maxLines: 2, overflow: TextOverflow.ellipsis),
-                      Text(_formatDate(widget.trip.startDate, widget.trip.endDate), style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w500, color: textDark.withOpacity(0.7))),
+                      Text(_formatDate(widget.trip.startDate, widget.trip.endDate), style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w500, color: textDark.withValues(alpha: 0.7))),
                     ],
                   ),
                 )
               ],
             ),
 
-            // THÀNH VIÊN
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
@@ -494,15 +762,21 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                             children: List.generate(_realMembers.length, (index) {
                               String avatarPath = _realMembers[index]['avatar'] ?? '';
                               String name = _realMembers[index]['displayName'] ?? 'U';
+                              String uid = _realMembers[index]['uid'];
+                              
                               return Positioned(
                                 left: index * 30.0,
-                                child: Container(
-                                  width: 40, height: 40,
-                                  decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)),
-                                  child: CircleAvatar(
-                                    backgroundColor: Colors.blue.shade100,
-                                    backgroundImage: avatarPath.isNotEmpty ? FileImage(File(avatarPath)) : null,
-                                    child: avatarPath.isEmpty ? Text(name[0].toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)) : null,
+                                // BỌC GESTURE DETECTOR ĐỂ BẤM VÀO LÀ KÍCH
+                                child: GestureDetector(
+                                  onTap: () => _showKickDialog(uid, name),
+                                  child: Container(
+                                    width: 40, height: 40,
+                                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 3)),
+                                    child: CircleAvatar(
+                                      backgroundColor: Colors.blue.shade100,
+                                      backgroundImage: avatarPath.isNotEmpty ? FileImage(File(avatarPath)) : null,
+                                      child: avatarPath.isEmpty ? Text(name[0].toUpperCase(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)) : null,
+                                    ),
                                   ),
                                 ),
                               );
@@ -514,7 +788,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         onTap: _showInviteBottomSheet, 
                         child: Container(
                           width: 40, height: 40,
-                          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: primaryColor, style: BorderStyle.solid), color: primaryColor.withOpacity(0.05)),
+                          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: primaryColor, style: BorderStyle.solid), color: primaryColor.withValues(alpha: 0.05)),
                           child: const Icon(Icons.person_add, color: primaryColor, size: 20),
                         ),
                       )
@@ -526,15 +800,14 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
             const SizedBox(height: 24),
 
-            // QUỸ NHÓM
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   color: Colors.white, borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: isFundEmpty ? Colors.red.withOpacity(0.3) : Colors.grey.shade200),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+                  border: Border.all(color: isFundEmpty ? Colors.red.withValues(alpha: 0.3) : Colors.grey.shade200),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10)],
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -555,7 +828,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: isFundEmpty ? Colors.red.withOpacity(0.1) : primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+                          decoration: BoxDecoration(color: isFundEmpty ? Colors.red.withValues(alpha: 0.1) : primaryColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20)),
                           child: Text(isFundEmpty ? 'Hết quỹ' : 'An toàn', style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.bold, color: isFundEmpty ? Colors.red : primaryColor)),
                         )
                       ],
@@ -582,14 +855,13 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
             const SizedBox(height: 16),
 
-            // BENTO GRID
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
                 children: [
                   _buildBentoCard(
                     color: coralColor, icon: Icons.calendar_today, title: 'Lịch trình', subtitle: 'Xem chi tiết', isHorizontal: true,
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ScheduleScreen())),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ScheduleScreen(tripId: widget.trip.id))),
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -614,6 +886,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                 ],
               ),
             ),
+            
+            _buildReviewSectionIfFinished(),
+            
             const SizedBox(height: 80), 
           ],
         ),
@@ -625,7 +900,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withOpacity(0.3), shape: BoxShape.circle),
+        padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.3), shape: BoxShape.circle),
         child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
@@ -636,7 +911,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(20), height: isHorizontal ? null : 140,
-        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: color.withOpacity(0.2))),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: color.withValues(alpha: 0.2))),
         child: isHorizontal
             ? Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -649,7 +924,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: textDark)),
-                          Text(subtitle, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w500, color: textDark.withOpacity(0.6))),
+                          Text(subtitle, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w500, color: textDark.withValues(alpha: 0.6))),
                         ],
                       )
                     ],

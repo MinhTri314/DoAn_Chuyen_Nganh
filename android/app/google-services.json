@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "479630668260-48vhr1j98uq8fkaga730gt6gmma25jn2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.tri_go",
+            "certificate_hash": "afac0f002a037ae5912e73e649cbe7c1464e9cdb"
+          }
+        },
+        {
           "client_id": "479630668260-39ede8kushe78iljln70j4b1dvtclell.apps.googleusercontent.com",
           "client_type": 3
         }

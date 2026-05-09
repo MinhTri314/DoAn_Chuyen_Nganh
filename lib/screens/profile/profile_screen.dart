@@ -37,7 +37,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
-  // --- LẤY ẢNH ĐẠI DIỆN THÔNG MINH (Hỗ trợ cả File local và Link Web) ---
+  // --- LẤY ẢNH ĐẠI DIỆN THÔNG MINH ---
   ImageProvider? _getAvatarProvider(String path) {
     if (path.isEmpty) return null;
     if (path.startsWith('http') || path.startsWith('https')) {
@@ -123,7 +123,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('Hủy', style: TextStyle(color: Colors.grey))),
               ElevatedButton(
                 onPressed: () async {
-                  FocusManager.instance.primaryFocus?.unfocus(); // Cụp bàn phím
+                  FocusManager.instance.primaryFocus?.unfocus(); 
                   if (nameController.text.isNotEmpty) {
                     await FirebaseDatabase.instance.ref('users/${currentUser!.uid}').update({
                       'displayName': nameController.text.trim(),
@@ -145,7 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- 2. LỊCH SỬ GIAO DỊCH (Giao diện chuẩn Ngân hàng) ---
+  // --- 2. LỊCH SỬ GIAO DỊCH ---
   void _showTransactionHistory() {
     showModalBottomSheet(
       context: context,
@@ -181,7 +181,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       final isPositive = tx['isPositive'] ?? true;
                       final type = tx['type'] ?? '';
                       
-                      // Chọn icon dựa theo loại giao dịch
                       IconData txIcon = isPositive ? Icons.south_west : Icons.north_east;
                       if (type == 'TOP_UP') txIcon = Icons.account_balance;
                       if (type == 'FUND_CONTRIBUTION') txIcon = Icons.account_balance_wallet;
@@ -209,7 +208,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- 3. THỐNG KÊ CHI TIÊU (Đã bổ sung Tổng Chi & Thu) ---
+  // --- 3. THỐNG KÊ CHI TIÊU ---
   void _showStatistics() {
     showDialog(
       context: context,
@@ -254,7 +253,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildStatCard(String label, double value, Color color, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: color.withOpacity(0.3))),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 26),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 77)),
+      ),
       child: Row(
         children: [
           Icon(icon, color: color), const SizedBox(width: 12),
@@ -459,6 +462,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // --- 6. HÀM MỚI: GỬI EMAIL ĐỔI MẬT KHẨU ---
+  void _showChangePasswordDialog() {
+    if (currentUser?.email == null) return;
+    bool isSending = false;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text('Đổi mật khẩu', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.mark_email_read_outlined, size: 50, color: AppColors.primary),
+                const SizedBox(height: 16),
+                Text('Hệ thống sẽ gửi một đường link đặt lại mật khẩu đến email:', textAlign: TextAlign.center, style: GoogleFonts.plusJakartaSans(fontSize: 14, color: Colors.grey.shade700)),
+                const SizedBox(height: 8),
+                Text(currentUser!.email!, style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 14, color: AppColors.textDark)),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSending ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Hủy', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))
+              ),
+              ElevatedButton(
+                onPressed: isSending ? null : () async {
+                  setDialogState(() => isSending = true);
+                  try {
+                    await FirebaseAuth.instance.sendPasswordResetEmail(email: currentUser!.email!);
+                    if (dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Đã gửi link đổi mật khẩu! Vui lòng kiểm tra email.'),
+                        backgroundColor: Colors.green,
+                      ));
+                    }
+                  } catch (e) {
+                    setDialogState(() => isSending = false);
+                    if (dialogContext.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e'), backgroundColor: Colors.red));
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                child: isSending 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Gửi email', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              )
+            ],
+          );
+        }
+      ),
+    );
+  }
+
   String _formatCurrency(double amount) => NumberFormat.currency(locale: 'vi_VN', symbol: 'đ').format(amount);
 
   @override
@@ -507,7 +568,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 24),
             
-            // --- DANH SÁCH MENU ---
+            // --- DANH SÁCH MENU ĐÃ ĐƯỢC CHÈN THÊM NÚT ĐỔI MẬT KHẨU ---
             Container(
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))]),
               child: Column(children: [
@@ -516,6 +577,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _buildListTile(Icons.analytics_outlined, 'Thống kê chi tiêu cá nhân', _showStatistics),
                 const Divider(height: 1, thickness: 0.5, color: Color(0xFFF0F2F5), indent: 64, endIndent: 16),
                 _buildListTile(Icons.person_outline, 'Cập nhật thông tin', _showUpdateProfileDialog),
+                const Divider(height: 1, thickness: 0.5, color: Color(0xFFF0F2F5), indent: 64, endIndent: 16),
+                _buildListTile(Icons.lock_outline, 'Đổi mật khẩu', _showChangePasswordDialog),
               ]),
             ),
             const SizedBox(height: 20),

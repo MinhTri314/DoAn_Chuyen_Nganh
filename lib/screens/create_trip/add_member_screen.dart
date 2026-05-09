@@ -21,7 +21,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
       backgroundColor: AppColors.background,
       // 1. App Bar
       appBar: AppBar(
-        backgroundColor: AppColors.background.withOpacity(0.9),
+        backgroundColor: AppColors.background.withValues(alpha: 0.9),
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
@@ -71,7 +71,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(color: Colors.grey.shade100),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4)],
+                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 4)],
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +204,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
                     backgroundColor: AppColors.primary,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     elevation: 8,
-                    shadowColor: AppColors.primary.withOpacity(0.3),
+                    shadowColor: AppColors.primary.withValues(alpha: 0.3),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -234,7 +234,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: isChecked ? AppColors.primary : Colors.grey.shade100),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4)],
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 4)],
         ),
         child: Row(
           children: [
@@ -283,7 +283,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
               Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: isLeader ? AppColors.primary.withOpacity(0.3) : Colors.transparent, width: 2)
+                  border: Border.all(color: isLeader ? AppColors.primary.withValues(alpha: 0.3) : Colors.transparent, width: 2)
                 ),
                 child: CircleAvatar(radius: 24, backgroundImage: NetworkImage(imageUrl))
               ),
@@ -310,7 +310,7 @@ class _AddMemberScreenState extends State<AddMemberScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: isLeader ? AppColors.primary.withOpacity(0.1) : Colors.grey.shade100,
+                        color: isLeader ? AppColors.primary.withValues(alpha: 0.1) : Colors.grey.shade100,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(role.toUpperCase(), style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.bold, color: isLeader ? AppColors.primary : AppColors.textGrey)),

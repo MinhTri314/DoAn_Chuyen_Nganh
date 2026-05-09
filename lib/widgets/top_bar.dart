@@ -29,7 +29,7 @@ class TopBar extends StatelessWidget {
                   padding: const EdgeInsets.all(2),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: AppColors.primary.withOpacity(0.2),
+                    color: AppColors.primary.withValues(alpha: 0.2),
                   ),
                   child: const CircleAvatar(
                     radius: 20,
@@ -65,7 +65,7 @@ class TopBar extends StatelessWidget {
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05), 
+                  color: Colors.black.withValues(alpha: 0.05), 
                   blurRadius: 4, 
                   offset: const Offset(0, 2)
                 )

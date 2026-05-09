@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:tri_go/constants.dart'; 
 import 'package:firebase_auth/firebase_auth.dart'; 
-import 'package:shared_preferences/shared_preferences.dart'; // IMPORT THƯ VIỆN MỚI
+import 'package:shared_preferences/shared_preferences.dart'; 
+import 'package:google_sign_in/google_sign_in.dart'; // THÊM THƯ VIỆN GOOGLE
+import 'package:firebase_database/firebase_database.dart'; // THÊM THƯ VIỆN DATABASE
+
 import 'register_screen.dart'; 
 import '../home_screen.dart';    
 
@@ -23,10 +26,10 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _loadSavedCredentials(); // GỌI HÀM TỰ ĐỘNG ĐIỀN KHI VỪA MỞ TRANG
+    _loadSavedCredentials(); 
   }
 
-  // --- HÀM ĐỌC DỮ LIỆU ĐÃ LƯU ---
+  // --- HÀM 1: TẢI THÔNG TIN ĐÃ LƯU ---
   Future<void> _loadSavedCredentials() async {
     final prefs = await SharedPreferences.getInstance();
     final savedEmail = prefs.getString('saved_email');
@@ -42,22 +45,21 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // --- HÀM LƯU HOẶC XÓA DỮ LIỆU ---
+  // --- HÀM 2: LƯU THÔNG TIN ĐĂNG NHẬP ---
   Future<void> _handleRememberMe() async {
     final prefs = await SharedPreferences.getInstance();
     if (_rememberMe) {
-      // Nếu tick -> Lưu lại
       await prefs.setString('saved_email', _emailController.text.trim());
       await prefs.setString('saved_password', _passwordController.text.trim());
       await prefs.setBool('remember_me', true);
     } else {
-      // Nếu bỏ tick -> Xóa đi
       await prefs.remove('saved_email');
       await prefs.remove('saved_password');
       await prefs.setBool('remember_me', false);
     }
   }
 
+  // --- HÀM 3: ĐĂNG NHẬP BẰNG EMAIL & MẬT KHẨU ---
   Future<void> _handleLogin() async {
     if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng nhập đủ Email và Mật khẩu')));
@@ -72,7 +74,6 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _passwordController.text.trim(),
       );
       
-      // GỌI HÀM LƯU DỮ LIỆU KHI ĐĂNG NHẬP THÀNH CÔNG
       await _handleRememberMe();
       
       if (mounted) {
@@ -94,6 +95,144 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // --- HÀM 4: ĐĂNG NHẬP BẰNG GOOGLE ---
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _isLoading = true);
+    try {
+      final GoogleSignInAccount? googleUser = await GoogleSignIn(serverClientId: '479630668260-39ede8kushe78iljln70j4b1dvtclell.apps.googleusercontent.com',).signIn();
+      if (googleUser == null) {
+        setState(() => _isLoading = false);
+        return; 
+      }
+
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      final AuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      User? user = userCredential.user;
+
+      if (user != null) {
+        // Kiểm tra xem user này đã có trên Realtime DB chưa
+        final userRef = FirebaseDatabase.instance.ref('users/${user.uid}');
+        final snapshot = await userRef.get();
+
+        // Nếu chưa có (đăng nhập Google lần đầu) -> Tạo profile mới
+        if (!snapshot.exists) {
+          await userRef.set({
+            'email': user.email,
+            'phone': user.phoneNumber ?? '',
+            'displayName': user.displayName ?? user.email!.split('@')[0],
+            'avatar': user.photoURL ?? '',
+            'balance': 0,
+            'createdAt': ServerValue.timestamp,
+          });
+        }
+
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context, 
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+            (route) => false 
+          );
+        }
+      }
+    } on FirebaseAuthException catch (e) {
+      String message = 'Đăng nhập Google thất bại';
+      // Bắt lỗi trùng email với tài khoản đã đăng ký thủ công
+      if (e.code == 'account-exists-with-different-credential') {
+        message = 'Email này đã được đăng ký bằng mật khẩu. Vui lòng đăng nhập bình thường.';
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- HÀM 5: DIALOG QUÊN MẬT KHẨU ---
+  void _showForgotPasswordDialog() {
+    final TextEditingController resetEmailController = TextEditingController(text: _emailController.text.trim());
+    bool isResetting = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text('Quên mật khẩu?', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Nhập email của bạn để nhận liên kết đặt lại mật khẩu.', style: GoogleFonts.plusJakartaSans(fontSize: 13, color: Colors.grey)),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: resetEmailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: InputDecoration(
+                    labelText: 'Email đã đăng ký',
+                    prefixIcon: const Icon(Icons.mail_outline, color: AppColors.primary),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: isResetting ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Hủy', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))
+              ),
+              ElevatedButton(
+                onPressed: isResetting ? null : () async {
+                  String email = resetEmailController.text.trim();
+                  if (email.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng nhập email!'), backgroundColor: Colors.red));
+                    return;
+                  }
+
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  setDialogState(() => isResetting = true);
+
+                  try {
+                    await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+                    
+                    if (dialogContext.mounted) {
+                      Navigator.pop(dialogContext);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Đã gửi link đặt lại mật khẩu. Vui lòng kiểm tra hộp thư email!'), 
+                        backgroundColor: Colors.green,
+                        duration: Duration(seconds: 4),
+                      ));
+                    }
+                  } on FirebaseAuthException catch (e) {
+                    setDialogState(() => isResetting = false);
+                    String msg = 'Có lỗi xảy ra, vui lòng thử lại sau!';
+                    if (e.code == 'user-not-found') {
+                      msg = 'Không tìm thấy tài khoản với email này.';
+                    } else if (e.code == 'invalid-email') {
+                      msg = 'Định dạng email không hợp lệ.';
+                    }
+                    if (dialogContext.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                child: isResetting 
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('Gửi link', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              )
+            ],
+          );
+        }
+      ),
+    );
   }
 
   @override
@@ -154,7 +293,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
                 TextButton(
-                  onPressed: () {}, 
+                  onPressed: _showForgotPasswordDialog, 
                   style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 30), tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                   child: Text('Quên mật khẩu?', style: GoogleFonts.plusJakartaSans(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 14))
                 ),
@@ -177,7 +316,22 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 30),
             _buildDivider(),
             const SizedBox(height: 30),
+
+            // NÚT ĐĂNG NHẬP GOOGLE
+            SizedBox(
+              width: double.infinity, height: 56,
+              child: OutlinedButton.icon(
+                onPressed: _isLoading ? null : _handleGoogleSignIn,
+                icon: const Icon(Icons.g_mobiledata, color: AppColors.primary, size: 32),
+                label: Text('Tiếp tục với Google', style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  side: const BorderSide(color: AppColors.borderColor),
+                ),
+              ),
+            ),
             
+            const SizedBox(height: 30),
             Center(
               child: GestureDetector(
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const RegisterScreen())),

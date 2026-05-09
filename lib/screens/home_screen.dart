@@ -15,6 +15,7 @@ import 'package:tri_go/screens/create_trip/create_trip_screen.dart';
 import 'package:tri_go/screens/profile/profile_screen.dart'; 
 import 'package:tri_go/screens/trip/TripDetailScreen.dart';
 import 'package:tri_go/screens/explore/explore_screen.dart'; 
+import 'package:tri_go/screens/trip/AllTripsScreen.dart'; 
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -38,7 +39,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (currentUser != null) {
       DatabaseReference userRef = FirebaseDatabase.instance.ref('users/${currentUser!.uid}');
       userRef.onValue.listen((event) {
-        if (event.snapshot.value != null) {
+        if (event.snapshot.value != null && mounted) {
           final data = event.snapshot.value as Map<dynamic, dynamic>;
           setState(() {
             _displayName = data['displayName'] ?? currentUser?.email?.split('@')[0] ?? "Người dùng";
@@ -47,6 +48,36 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
     }
+  }
+
+  // --- HÀM MỚI: HIỂN THỊ DIALOG CHẤP NHẬN LỜI MỜI ---
+  void _showAcceptDialog(String tripId, String tripTitle) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Lời mời tham gia', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: AppColors.primary)),
+        content: Text('Bạn được mời tham gia chuyến đi "$tripTitle". Bạn có muốn tham gia chia sẻ hành trình này không?', style: GoogleFonts.plusJakartaSans()),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await FirebaseDatabase.instance.ref('trips/$tripId/pendingMembers/${currentUser!.uid}').remove();
+            }, 
+            child: const Text('Từ chối', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            onPressed: () async {
+              Navigator.pop(context);
+              await FirebaseDatabase.instance.ref('trips/$tripId/pendingMembers/${currentUser!.uid}').remove();
+              await FirebaseDatabase.instance.ref('trips/$tripId/members/${currentUser!.uid}').set(true);
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã tham gia chuyến đi!'), backgroundColor: Colors.green));
+            }, 
+            child: const Text('Chấp nhận', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+          )
+        ]
+      )
+    );
   }
 
   String _formatCurrency(double amount) => NumberFormat.currency(locale: 'vi_VN', symbol: 'đ').format(amount);
@@ -66,7 +97,6 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
               Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Row(
@@ -83,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileScreen())),
                       child: Container(
                         padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.primary.withOpacity(0.3), width: 2)),
+                        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.primary.withValues(alpha: 77), width: 2)),
                         child: CircleAvatar(
                           radius: 22, backgroundColor: Colors.blue.shade50,
                           backgroundImage: _avatarPath.isNotEmpty ? FileImage(File(_avatarPath)) : null,
@@ -95,7 +125,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              // --- ĐỊA ĐIỂM NỔI BẬT (Ấn vào được) ---
               _buildSectionHeader('Địa điểm nổi bật', 'Khám phá', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ExploreScreen()))),
               
               SingleChildScrollView(
@@ -109,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     GestureDetector(
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateTripScreen(initialDestination: 'Đà Lạt'))),
-                      child: const DestinationCard(title: 'Đà Lạt', location: 'Lâm Đồng', description: 'Thành phố ngàn hoa.', imageUrl: 'assets/images/da_lat.webp'), // Nếu báo lỗi đường dẫn thì dùng link mạng nha
+                      child: const DestinationCard(title: 'Đà Lạt', location: 'Lâm Đồng', description: 'Thành phố ngàn hoa.', imageUrl: 'assets/images/da_lat.webp'),
                     ),
                     GestureDetector(
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const CreateTripScreen(initialDestination: 'Phú Quốc'))),
@@ -121,13 +150,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 10),
 
-              // --- CHUYẾN ĐI CỦA TÔI (Load Firebase) ---
-              _buildSectionHeader('Chuyến đi của bạn', 'Xem tất cả', onTap: () {}),
+              _buildSectionHeader('Chuyến đi của bạn', 'Xem tất cả', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const AllTripsScreen()))),
               
               SizedBox(
                 height: 280, 
                 child: StreamBuilder(
-                  stream: FirebaseDatabase.instance.ref('trips').orderByChild('createdBy').equalTo(currentUser?.uid).onValue,
+                  stream: FirebaseDatabase.instance.ref('trips').onValue,
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
                     if (!snapshot.hasData || snapshot.data!.snapshot.value == null) {
@@ -137,18 +165,52 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             Icon(Icons.flight_takeoff, size: 50, color: Colors.grey.shade300),
                             const SizedBox(height: 10),
-                            Text('Chưa có chuyến đi nào.\nHãy tạo chuyến đi đầu tiên nhé!', textAlign: TextAlign.center, style: GoogleFonts.plusJakartaSans(color: Colors.grey)),
+                            Text('Chưa có chuyến đi nào.\nHãy tạo hoặc chờ được mời nhé!', textAlign: TextAlign.center, style: GoogleFonts.plusJakartaSans(color: Colors.grey)),
                           ],
                         ),
                       );
                     }
                     
-                    // Parse dữ liệu từ Firebase
                     final data = snapshot.data!.snapshot.value as Map<dynamic, dynamic>;
                     List<Map<dynamic, dynamic>> rawTrips = [];
-                    data.forEach((key, value) => rawTrips.add({'key': key, ...value as Map<dynamic, dynamic>}));
                     
-                    // Xếp mới nhất lên đầu
+                    data.forEach((key, value) {
+                      final tripData = value as Map<dynamic, dynamic>;
+                      
+                      bool isCreator = tripData['createdBy'] == currentUser?.uid;
+                      bool isMember = tripData['members'] != null && tripData['members'][currentUser!.uid] != null;
+                      bool isPending = tripData['pendingMembers'] != null && tripData['pendingMembers'][currentUser!.uid] != null;
+                      
+                      // Hiển thị nếu là chủ, là thành viên, hoặc đang trong danh sách chờ
+                      if (isCreator || isMember || isPending) {
+                        DateTime? endDate = DateTime.tryParse(tripData['endDate'] ?? '');
+                        
+                        bool isFinished = endDate != null && DateTime.now().isAfter(endDate.add(const Duration(days: 1)));
+                        bool isReviewed = false;
+                        
+                        if (currentUser != null && tripData['reviewedBy'] != null && tripData['reviewedBy'][currentUser!.uid] == true) {
+                          isReviewed = true;
+                        }
+                        
+                        if (!(isFinished && isReviewed)) {
+                          rawTrips.add({'key': key, ...tripData});
+                        }
+                      }
+                    });
+
+                    if (rawTrips.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.check_circle_outline, size: 50, color: Colors.green),
+                            const SizedBox(height: 10),
+                            Text('Chưa có chuyến đi nào đang diễn ra!', textAlign: TextAlign.center, style: GoogleFonts.plusJakartaSans(color: Colors.grey)),
+                          ],
+                        ),
+                      );
+                    }
+
                     rawTrips.sort((a, b) => (b['createdAt'] ?? 0).compareTo(a['createdAt'] ?? 0));
 
                     return ListView.builder(
@@ -158,7 +220,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemBuilder: (context, index) {
                         final tData = rawTrips[index];
                         
-                        // Ánh xạ thành Model Trip (Để dùng lại giao diện cũ)
                         final trip = Trip(
                           id: tData['id'] ?? tData['key'],
                           title: tData['title'] ?? 'Chuyến đi mới',
@@ -169,9 +230,31 @@ class _HomeScreenState extends State<HomeScreen> {
                           budgetLimit: (tData['budgetLimit'] ?? 0).toDouble(),
                         );
 
+                        bool isThisCardPending = tData['pendingMembers'] != null && tData['pendingMembers'][currentUser!.uid] != null;
+
                         return GestureDetector(
-                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => TripDetailScreen(trip: trip))),
-                          child: Container(width: 320, margin: const EdgeInsets.only(right: 16), child: TripCard(trip: trip)),
+                          onTap: () {
+                            if (isThisCardPending) {
+                              _showAcceptDialog(trip.id, trip.title);
+                            } else {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => TripDetailScreen(trip: trip)));
+                            }
+                          },
+                          child: Stack(
+                            children: [
+                              Container(width: 320, margin: const EdgeInsets.only(right: 16), child: TripCard(trip: trip)),
+                              
+                              if (isThisCardPending)
+                                Positioned(
+                                  top: 10, right: 26, 
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(20), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]),
+                                    child: const Text('Có lời mời!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))
+                                  )
+                                )
+                            ]
+                          )
                         );
                       },
                     );
@@ -181,7 +264,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SizedBox(height: 10),
 
-              // --- CHI TIÊU GẦN ĐÂY ---
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
                 child: Text('Giao dịch gần đây', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.textDark)),

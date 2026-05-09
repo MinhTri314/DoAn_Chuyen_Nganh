@@ -235,7 +235,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     onTap: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đang mở Camera quét QR...'))),
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.blue.shade200)),
+                      decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.blue.shade200)),
                       child: Column(children: [const Icon(Icons.qr_code_scanner, color: Colors.blue, size: 32), const SizedBox(height: 8), Text('Quét mã QR', style: GoogleFonts.plusJakartaSans(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 12))]),
                     ),
                   ),
@@ -246,7 +246,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     onTap: _scanBill,
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withOpacity(0.3))),
+                      decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.primary.withValues(alpha: 0.3))),
                       child: Column(
                         children: [
                           _isProcessingImage 
